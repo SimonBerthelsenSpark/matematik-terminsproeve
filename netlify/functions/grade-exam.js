@@ -1,8 +1,7 @@
 // Netlify Function til at rette eksamen - beskytter din OpenAI API key med streaming support
-const fetch = require('node-fetch');
-const { StringDecoder } = require('string_decoder');
+import { StringDecoder } from 'string_decoder';
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   // Only allow POST
   if (event.httpMethod !== 'POST') {
     return {
