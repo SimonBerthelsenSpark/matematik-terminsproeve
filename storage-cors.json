@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://lovely-lolly-f39ae9.netlify.app", "http://localhost:5173", "http://localhost:5174"],
+    "method": ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Authorization", "Content-Length", "User-Agent", "X-Requested-With", "Access-Control-Allow-Origin"],
+    "maxAgeSeconds": 3600
+  }
+]

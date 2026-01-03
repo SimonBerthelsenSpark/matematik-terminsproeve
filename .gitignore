@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Production
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+*.log
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Backup files (NEW)
+*.backup
+*.bak
+*.old
+
+# Debug files (NEW)
+debug-*
+*.debug.js
+*.debug.jsx
+
+# Temporary files (NEW)
+*.tmp
+temp-*
+tmp/
+
+# Local testing
+.netlify/
