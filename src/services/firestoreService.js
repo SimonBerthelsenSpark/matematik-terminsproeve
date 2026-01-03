@@ -443,6 +443,12 @@ export async function deleteSubmission(examId, submissionId, storagePath) {
  */
 export async function saveGradingResult(examId, submissionId, gradingData) {
   try {
+    console.log('💾 saveGradingResult called with:', { examId, submissionId });
+    console.log('💾 gradingData received:', gradingData);
+    console.log('💾 gradingData.dele:', gradingData.dele);
+    console.log('💾 gradingData.dele type:', typeof gradingData.dele);
+    console.log('💾 gradingData.dele isArray:', Array.isArray(gradingData.dele));
+    
     // Use submissionId as document ID to prevent duplicates
     const docRef = doc(db, 'exams', examId, 'gradingResults', submissionId);
     
@@ -456,6 +462,7 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
     
     // Detect exam type based on data structure
     const isDansk = gradingData.dele && Array.isArray(gradingData.dele);
+    console.log('💾 Detected isDansk:', isDansk);
     
     // Build aiGrading object based on exam type
     let aiGrading;
@@ -507,7 +514,7 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
     }
     
     // Save the grading result using setDoc with submissionId as document ID
-    await setDoc(docRef, {
+    const dataToSave = {
       submissionId,
       examId,
       elevNavn: gradingData.elevNavn || submissionId,
@@ -525,9 +532,15 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
       status: 'graded',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
-    });
+    };
+    
+    console.log('💾 Final dataToSave structure:', JSON.stringify(dataToSave, null, 2));
+    console.log('💾 aiGrading.dele in dataToSave:', dataToSave.aiGrading?.dele);
+    
+    await setDoc(docRef, dataToSave);
     
     console.log(`✅ Created grading result document: ${submissionId}`);
+    console.log(`✅ Saved with ${isDansk ? 'DANSK' : 'MATEMATIK'} structure`);
     
     // Update or create submission with grading result ID
     try {

@@ -743,6 +743,12 @@ export function MathExamGrader() {
                         
                         if (exam?.type === 'Dansk') {
                             // Dansk: Save dele structure
+                            console.log('🔍 DEBUG: Preparing Dansk gradingData for submission:', submissionId);
+                            console.log('🔍 DEBUG: result.dele:', result.dele);
+                            console.log('🔍 DEBUG: result.dele length:', result.dele?.length);
+                            console.log('🔍 DEBUG: result.samletKarakter:', result.samletKarakter);
+                            console.log('🔍 DEBUG: result.afrundetKarakter:', result.afrundetKarakter);
+                            
                             gradingData = {
                                 submissionId: submissionId,
                                 elevNavn: result.elevNavn,
@@ -756,6 +762,9 @@ export function MathExamGrader() {
                                 apiCost: danskTotalCost / newResults.filter(r => !r.error).length || 0,
                                 processingTimeMs: 0
                             };
+                            
+                            console.log('🔍 DEBUG: Final gradingData.dele:', gradingData.dele);
+                            console.log('🔍 DEBUG: Final gradingData structure:', JSON.stringify(gradingData, null, 2));
                         } else {
                             // Matematik: Save opgaver structure (original)
                             gradingData = {
