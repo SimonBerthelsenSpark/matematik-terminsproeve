@@ -454,14 +454,37 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
       return existingDoc.id;
     }
     
-    // Save the grading result using setDoc with submissionId as document ID
-    await setDoc(docRef, {
-      submissionId,
-      examId,
-      elevNavn: gradingData.elevNavn || submissionId,
+    // Detect exam type based on data structure
+    const isDansk = gradingData.dele && Array.isArray(gradingData.dele);
+    
+    // Build aiGrading object based on exam type
+    let aiGrading;
+    let finalGrade;
+    
+    if (isDansk) {
+      // DANSK: Save dele structure
+      aiGrading = {
+        dele: gradingData.dele || [],
+        samletKarakter: gradingData.samletKarakter || 0,
+        afrundetKarakter: gradingData.afrundetKarakter || 0,
+        karakterBegrundelse: gradingData.karakterBegrundelse || '',
+        
+        // AI metadata
+        aiProvider: gradingData.aiProvider || 'openai',
+        aiModel: gradingData.aiModel || 'gpt-4o',
+        apiCost: gradingData.apiCost || 0,
+        processedAt: serverTimestamp(),
+        processingTimeMs: gradingData.processingTimeMs || 0
+      };
       
-      // AI Grading
-      aiGrading: {
+      finalGrade = {
+        afrundetKarakter: gradingData.afrundetKarakter || 0,
+        samletKarakter: gradingData.samletKarakter || 0,
+        source: 'ai'
+      };
+    } else {
+      // MATEMATIK: Save opgaver structure
+      aiGrading = {
         opgaver: gradingData.opgaver || [],
         totalPoint: gradingData.totalPoint || 0,
         karakter: gradingData.karakter || 0,
@@ -474,17 +497,30 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
         apiCost: gradingData.apiCost || 0,
         processedAt: serverTimestamp(),
         processingTimeMs: gradingData.processingTimeMs || 0
-      },
+      };
+      
+      finalGrade = {
+        totalPoint: gradingData.totalPoint || 0,
+        karakter: gradingData.karakter || 0,
+        source: 'ai'
+      };
+    }
+    
+    // Save the grading result using setDoc with submissionId as document ID
+    await setDoc(docRef, {
+      submissionId,
+      examId,
+      elevNavn: gradingData.elevNavn || submissionId,
+      fileName: gradingData.fileName || submissionId,
+      
+      // AI Grading (type-specific)
+      aiGrading,
       
       // No teacher grading initially
       lærerGrading: null,
       
-      // Final grade (initially same as AI grading)
-      finalGrade: {
-        totalPoint: gradingData.totalPoint || 0,
-        karakter: gradingData.karakter || 0,
-        source: 'ai'
-      },
+      // Final grade (type-specific)
+      finalGrade,
       
       status: 'graded',
       createdAt: serverTimestamp(),
@@ -575,19 +611,48 @@ export async function getGradingResult(examId, resultId) {
 export async function updateTeacherGrading(examId, resultId, teacherGrading) {
   try {
     const docRef = doc(db, 'exams', examId, 'gradingResults', resultId);
-    await updateDoc(docRef, {
-      lærerGrading: {
+    
+    // Detect type based on teacherGrading structure
+    const isDansk = teacherGrading.dele && Array.isArray(teacherGrading.dele);
+    
+    let lærerGradingData;
+    let finalGrade;
+    
+    if (isDansk) {
+      // DANSK structure
+      lærerGradingData = {
+        dele: teacherGrading.dele || [],
+        samletKarakter: teacherGrading.samletKarakter || 0,
+        afrundetKarakter: teacherGrading.afrundetKarakter || 0,
+        adjustedAt: serverTimestamp(),
+        adjustedBy: teacherGrading.adjustedBy || 'anonymous'
+      };
+      
+      finalGrade = {
+        afrundetKarakter: teacherGrading.afrundetKarakter || 0,
+        samletKarakter: teacherGrading.samletKarakter || 0,
+        source: 'teacher'
+      };
+    } else {
+      // MATEMATIK structure
+      lærerGradingData = {
         opgaver: teacherGrading.opgaver || [],
         lærerTotalPoint: teacherGrading.totalPoint,
         lærerKarakter: teacherGrading.karakter,
         adjustedAt: serverTimestamp(),
         adjustedBy: teacherGrading.adjustedBy || 'anonymous'
-      },
-      finalGrade: {
+      };
+      
+      finalGrade = {
         totalPoint: teacherGrading.totalPoint,
         karakter: teacherGrading.karakter,
         source: 'teacher'
-      },
+      };
+    }
+    
+    await updateDoc(docRef, {
+      lærerGrading: lærerGradingData,
+      finalGrade: finalGrade,
       status: 'reviewed',
       updatedAt: serverTimestamp()
     });
@@ -616,8 +681,9 @@ export async function recalculateExamStats(examId) {
     
     results.forEach(result => {
       if (result.finalGrade) {
-        totalPoints += result.finalGrade.totalPoint || 0;
-        totalGrades += result.finalGrade.karakter || 0;
+        // Handle both Matematik (totalPoint/karakter) and Dansk (afrundetKarakter/samletKarakter)
+        totalPoints += result.finalGrade.totalPoint || result.finalGrade.samletKarakter || 0;
+        totalGrades += result.finalGrade.karakter || result.finalGrade.afrundetKarakter || 0;
         count++;
       }
     });
