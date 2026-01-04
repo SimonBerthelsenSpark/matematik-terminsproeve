@@ -143,6 +143,62 @@ export async function getAllExams(options = {}) {
  * @param {Object} updates - Fields to update
  * @returns {Promise<void>}
  */
+/**
+ * Generate and save vægttabel from parsed bedømmelseskema
+ * @param {string} examId - Exam ID
+ * @param {Object} parsedBedoemmelse - Parsed bedømmelseskema with weights
+ * @returns {Promise<Object>} Generated vægttabel
+ */
+export async function generateVaegttabel(examId, parsedBedoemmelse) {
+  try {
+    const vaegttabel = {
+      dele: parsedBedoemmelse.dele.map(del => ({
+        navn: del.navn,
+        totalVaegt: del.totalVaegt,
+        kriterier: del.kriterier.map(krit => ({
+          navn: krit.navn,
+          vaegt: krit.vaegt,
+          beskrivelse: krit.beskrivelse || ''
+        }))
+      })),
+      generatedAt: new Date(),
+      lastModified: new Date()
+    };
+    
+    // Save to Firestore
+    const examRef = doc(db, 'exams', examId);
+    await updateDoc(examRef, { vaegttabel });
+    
+    console.log('✅ Vægttabel genereret og gemt:', vaegttabel);
+    return vaegttabel;
+  } catch (error) {
+    console.error('❌ Error generating vægttabel:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update vægttabel for an exam
+ * @param {string} examId - Exam ID
+ * @param {Object} vaegttabel - Updated vægttabel
+ * @returns {Promise<void>}
+ */
+export async function updateVaegttabel(examId, vaegttabel) {
+  try {
+    const examRef = doc(db, 'exams', examId);
+    await updateDoc(examRef, {
+      vaegttabel: {
+        ...vaegttabel,
+        lastModified: new Date()
+      }
+    });
+    console.log('✅ Vægttabel opdateret');
+  } catch (error) {
+    console.error('❌ Error updating vægttabel:', error);
+    throw error;
+  }
+}
+
 export async function updateExam(examId, updates) {
   try {
     const docRef = doc(db, 'exams', examId);

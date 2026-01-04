@@ -5,7 +5,9 @@ import { useClasses } from '../hooks/useClasses.js';
 import { Layout } from '../components/Layout.jsx';
 import { Loader2, AlertCircle, CheckCircle } from '../components/Icons.jsx';
 import { uploadExamFile } from '../services/storageService.js';
-import { updateExam, updateExamFileRef } from '../services/firestoreService.js';
+import { updateExam, updateExamFileRef, generateVaegttabel, updateVaegttabel } from '../services/firestoreService.js';
+import { parseDanskBedoemmelse, getCachedParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
+import { getFileDownloadURL } from '../services/storageService.js';
 
 /**
  * EditExamPage - Form for editing an existing exam and uploading files
@@ -39,6 +41,12 @@ export function EditExamPage() {
   const [uploadingRettevejledning, setUploadingRettevejledning] = useState(false);
   const [uploadingOmsætningstabel, setUploadingOmsætningstabel] = useState(false);
   const [uploadingBedoemmelseskema, setUploadingBedoemmelseskema] = useState(false);
+  
+  // Vægttabel states (Dansk only)
+  const [vaegttabel, setVaegttabel] = useState(null);
+  const [editingVaegttabel, setEditingVaegttabel] = useState(false);
+  const [generatingVaegttabel, setGeneratingVaegttabel] = useState(false);
+  const [savingVaegttabel, setSavingVaegttabel] = useState(false);
 
   /**
    * Load exam data
@@ -77,6 +85,85 @@ export function EditExamPage() {
       setLoading(false);
     }
   }, [examId, exams]);
+  
+  /**
+   * Load vægttabel from exam (Dansk only)
+   */
+  useEffect(() => {
+    if (exam && exam.type === 'Dansk' && exam.vaegttabel) {
+      setVaegttabel(exam.vaegttabel);
+    }
+  }, [exam]);
+  
+  /**
+   * Generate vægttabel from bedømmelseskema
+   */
+  const handleGenerateVaegttabel = async () => {
+    if (!exam || !exam.bedoemmelseskemaRef) {
+      alert('Upload bedømmelseskema først');
+      return;
+    }
+    
+    try {
+      setGeneratingVaegttabel(true);
+      
+      // Check if we have cached parsed bedømmelseskema
+      let parsedBedoemmelse = getCachedParsedBedoemmelse(exam);
+      
+      if (!parsedBedoemmelse || !parsedBedoemmelse.dele || parsedBedoemmelse.dele.length === 0) {
+        // Need to download and parse bedømmelseskema
+        const url = await getFileDownloadURL(exam.bedoemmelseskemaRef.storagePath);
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const file = new File([blob], exam.bedoemmelseskemaRef.fileName, {
+          type: exam.bedoemmelseskemaRef.contentType
+        });
+        
+        parsedBedoemmelse = await parseDanskBedoemmelse(file);
+      }
+      
+      // Generate vægttabel
+      const newVaegttabel = await generateVaegttabel(examId, parsedBedoemmelse);
+      setVaegttabel(newVaegttabel);
+      
+      // Refresh exams to get updated data
+      await refreshExams();
+      
+      alert('Vægttabel genereret succesfuldt!');
+    } catch (error) {
+      console.error('Error generating vægttabel:', error);
+      alert(`Fejl ved generering af vægttabel: ${error.message}`);
+    } finally {
+      setGeneratingVaegttabel(false);
+    }
+  };
+  
+  /**
+   * Handle weight change in vægttabel
+   */
+  const handleWeightChange = (delIdx, kritIdx, newWeight) => {
+    const updated = { ...vaegttabel };
+    updated.dele[delIdx].kriterier[kritIdx].vaegt = parseFloat(newWeight);
+    setVaegttabel(updated);
+  };
+  
+  /**
+   * Save updated vægttabel
+   */
+  const handleSaveVaegttabel = async () => {
+    try {
+      setSavingVaegttabel(true);
+      await updateVaegttabel(examId, vaegttabel);
+      await refreshExams();
+      setEditingVaegttabel(false);
+      alert('Vægttabel gemt!');
+    } catch (error) {
+      console.error('Error saving vægttabel:', error);
+      alert(`Fejl ved gemning: ${error.message}`);
+    } finally {
+      setSavingVaegttabel(false);
+    }
+  };
 
   /**
    * Handle input change
@@ -664,6 +751,138 @@ export function EditExamPage() {
                       ℹ️ Bedømmelseskemaet skal indeholde alle kriterier med vægte og beskrivelser
                     </p>
                   </div>
+                  
+                  {/* Vægttabel for Dansk */}
+                  {exam.bedoemmelseskemaRef && (
+                    <div className="mt-6 border-t pt-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-800">Vægttabel</h4>
+                          <p className="text-xs text-gray-600 mt-1">
+                            Vægten af hvert kriterium - bruges til karakterberegning
+                          </p>
+                        </div>
+                        {vaegttabel && (
+                          <div className="flex items-center gap-2 text-green-600">
+                            <CheckCircle className="w-5 h-5" />
+                            <span className="text-xs font-medium">Genereret</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {!vaegttabel ? (
+                        <button
+                          type="button"
+                          onClick={handleGenerateVaegttabel}
+                          disabled={generatingVaegttabel}
+                          className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                          {generatingVaegttabel ? (
+                            <>
+                              <Loader2 />
+                              Genererer vægttabel...
+                            </>
+                          ) : (
+                            <>
+                              ⚙️ Generer vægttabel fra bedømmelseskema
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="space-y-4">
+                          {/* Show/Edit Vægttabel */}
+                          {editingVaegttabel ? (
+                            <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
+                              <p className="text-amber-900 font-semibold text-sm mb-3">
+                                ✏️ Redigerer vægttabel - justér vægte nedenfor
+                              </p>
+                              <div className="space-y-4 max-h-96 overflow-y-auto">
+                                {vaegttabel.dele.map((del, delIdx) => (
+                                  <div key={delIdx} className="bg-white rounded-lg p-3 border border-gray-200">
+                                    <h5 className="font-semibold text-gray-800 mb-2 text-sm">
+                                      {del.navn} ({del.totalVaegt}%)
+                                    </h5>
+                                    <div className="space-y-2">
+                                      {del.kriterier.map((krit, kritIdx) => (
+                                        <div key={kritIdx} className="flex items-center gap-3 text-sm">
+                                          <label className="flex-1 text-gray-700">{krit.navn}</label>
+                                          <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0"
+                                            max="100"
+                                            value={krit.vaegt}
+                                            onChange={(e) => handleWeightChange(delIdx, kritIdx, e.target.value)}
+                                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                                          />
+                                          <span className="text-gray-600 w-6">%</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex gap-2 mt-4">
+                                <button
+                                  type="button"
+                                  onClick={handleSaveVaegttabel}
+                                  disabled={savingVaegttabel}
+                                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors"
+                                >
+                                  {savingVaegttabel ? '💾 Gemmer...' : '✅ Gem vægttabel'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingVaegttabel(false)}
+                                  disabled={savingVaegttabel}
+                                  className="px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white text-sm font-semibold rounded-lg transition-colors"
+                                >
+                                  ❌ Annuller
+                                </button>
+                              </div>
+</div>
+                          ) : (
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                              <div className="space-y-3 max-h-64 overflow-y-auto">
+                                {vaegttabel.dele.map((del, delIdx) => (
+                                  <div key={delIdx} className="bg-white rounded-lg p-3 border border-gray-200">
+                                    <h5 className="font-semibold text-gray-800 mb-2 text-sm">
+                                      {del.navn} ({del.totalVaegt}%)
+                                    </h5>
+                                    <div className="space-y-1">
+                                      {del.kriterier.map((krit, kritIdx) => (
+                                        <div key={kritIdx} className="flex justify-between text-xs text-gray-700">
+                                          <span>{krit.navn}</span>
+                                          <span className="font-semibold">{krit.vaegt}%</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex gap-2 mt-4">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingVaegttabel(true)}
+                                  className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                                >
+                                  ✏️ Rediger vægttabel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleGenerateVaegttabel}
+                                  disabled={generatingVaegttabel}
+                                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors"
+                                >
+                                  {generatingVaegttabel ? '⚙️ Genererer...' : '🔄 Gengenerer'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : null}
             </div>

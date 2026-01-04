@@ -154,51 +154,58 @@ export function MathExamGrader() {
                         setUploadedFiles(prev => ({ ...prev, bedoemmelseskema: exam.bedoemmelseskemaRef }));
                         console.log('📄 Loaded existing bedømmelseskema');
                         
-                        // Parse bedømmelseskema (check cache first)
-                        let parsed = getCachedParsedBedoemmelse(exam);
-                        
-                        // Validate cached version - check for various issues
-                        let needsReparse = false;
-                        
-                        if (!parsed || !parsed.dele || parsed.dele.length === 0) {
-                            needsReparse = true;
-                            console.log('⚠️ Cached parsed bedømmelseskema is empty');
+                        // Check if vægttabel exists - use it instead of parsing
+                        if (exam.vaegttabel) {
+                            console.log('✅ Using vægttabel from exam');
+                            setParsedBedoemmelse(exam.vaegttabel);
+                            setParsingBedoemmelse(false);
                         } else {
-                            // Check for invalid criteria or missing weights
-                            parsed.dele.forEach(del => {
-                                // Check if section weight is missing
-                                if (del.totalVaegt === null || del.totalVaegt === undefined) {
-                                    needsReparse = true;
-                                    console.log(`⚠️ Found section without weight: "${del.navn}"`);
-                                }
-                                
-                                del.kriterier.forEach(krit => {
-                                    // Check if criterion weight is missing
-                                    if (krit.vaegt === null || krit.vaegt === undefined) {
+                            // Parse bedømmelseskema (check cache first)
+                            let parsed = getCachedParsedBedoemmelse(exam);
+                            
+                            // Validate cached version - check for various issues
+                            let needsReparse = false;
+                            
+                            if (!parsed || !parsed.dele || parsed.dele.length === 0) {
+                                needsReparse = true;
+                                console.log('⚠️ Cached parsed bedømmelseskema is empty');
+                            } else {
+                                // Check for invalid criteria or missing weights
+                                parsed.dele.forEach(del => {
+                                    // Check if section weight is missing
+                                    if (del.totalVaegt === null || del.totalVaegt === undefined) {
                                         needsReparse = true;
-                                        console.log(`⚠️ Found criterion without weight: "${krit.navn}"`);
+                                        console.log(`⚠️ Found section without weight: "${del.navn}"`);
                                     }
-                                    // If a criterion name is suspiciously long (likely a description, not a criterion)
-                                    if (krit.navn.split(' ').length > 10) {
-                                        needsReparse = true;
-                                        console.log(`⚠️ Found invalid criterion in cache: "${krit.navn.substring(0, 60)}..."`);
-                                    }
+                                    
+                                    del.kriterier.forEach(krit => {
+                                        // Check if criterion weight is missing
+                                        if (krit.vaegt === null || krit.vaegt === undefined) {
+                                            needsReparse = true;
+                                            console.log(`⚠️ Found criterion without weight: "${krit.navn}"`);
+                                        }
+                                        // If a criterion name is suspiciously long (likely a description, not a criterion)
+                                        if (krit.navn.split(' ').length > 10) {
+                                            needsReparse = true;
+                                            console.log(`⚠️ Found invalid criterion in cache: "${krit.navn.substring(0, 60)}..."`);
+                                        }
+                                    });
                                 });
-                            });
+                            }
+                            
+                            if (needsReparse) {
+                                console.log('🔄 Re-parsing bedømmelseskema with updated parser...');
+                                setParsingBedoemmelse(true);
+                                parsed = await parseDanskBedoemmelse(file);
+                                // Save to Firestore for caching
+                                await saveParsedBedoemmelse(examId, parsed);
+                                console.log('✅ Bedømmelseskema parsed and cached');
+                            } else {
+                                console.log('✅ Using cached parsed bedømmelseskema');
+                            }
+                            setParsedBedoemmelse(parsed);
+                            setParsingBedoemmelse(false);
                         }
-                        
-                        if (needsReparse) {
-                            console.log('🔄 Re-parsing bedømmelseskema with updated parser...');
-                            setParsingBedoemmelse(true);
-                            parsed = await parseDanskBedoemmelse(file);
-                            // Save to Firestore for caching
-                            await saveParsedBedoemmelse(examId, parsed);
-                            console.log('✅ Bedømmelseskema parsed and cached');
-                        } else {
-                            console.log('✅ Using cached parsed bedømmelseskema');
-                        }
-                        setParsedBedoemmelse(parsed);
-                        setParsingBedoemmelse(false);
                     } catch (err) {
                         console.error('❌ Error loading/parsing bedømmelseskema:', err);
                         setParsingBedoemmelse(false);
