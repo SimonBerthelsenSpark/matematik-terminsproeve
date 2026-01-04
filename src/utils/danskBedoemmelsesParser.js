@@ -284,7 +284,12 @@ function parseKriterierWithoutPercentages(lines) {
     if (!criterionName && line.match(/^[A-ZÆØÅ]/)) {  // Starts with capital letter
       const colonMatch = line.match(/^([^:]+):\s*$/);
       if (colonMatch) {
-        criterionName = colonMatch[1].trim();
+        const potentialName = colonMatch[1].trim();
+        // Filter out long descriptive sentences (criteria are usually short, 2-6 words)
+        const wordCount = potentialName.split(/\s+/).length;
+        if (wordCount <= 8) {  // Reasonable criterion name length
+          criterionName = potentialName;
+        }
       }
     }
     
