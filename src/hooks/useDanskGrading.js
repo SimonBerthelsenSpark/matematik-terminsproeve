@@ -23,18 +23,9 @@ export async function bedoemDanskOpgave(
 ) {
   try {
     // Validate parsedBedoemmelse before proceeding
-    console.log('🔍 VALIDATING parsedBedoemmelse:', parsedBedoemmelse);
-    console.log('🔍 parsedBedoemmelse.dele:', parsedBedoemmelse?.dele);
-    console.log('🔍 parsedBedoemmelse.dele.length:', parsedBedoemmelse?.dele?.length);
-    
     if (!parsedBedoemmelse || !parsedBedoemmelse.dele || parsedBedoemmelse.dele.length === 0) {
-      throw new Error('Bedømmelseskema er tomt eller ikke korrekt parsed. Kontroller at bedømmelseskemaet indeholder kriterier med procent-angivelser.');
+      throw new Error('Bedømmelseskema er tomt eller ikke korrekt parsed. Kontroller at bedømmelseskemaet indeholder kriterier.');
     }
-    
-    // Log structure for debugging
-    parsedBedoemmelse.dele.forEach((del, idx) => {
-      console.log(`  Del ${idx + 1}: ${del.navn} (${del.totalVaegt}%) med ${del.kriterier.length} kriterier`);
-    });
     
     // 1. Generer dynamisk prompt baseret på parsedBedoemmelse
     const { systemPrompt, userPrompt } = generateDynamicPrompt(
@@ -384,20 +375,10 @@ function parseAIResponse(content) {
  * @returns {Object} Komplet grading result
  */
 function calculateGradingResult(parsedBedoemmelse, aiGrading, elevNavn, submissionId) {
-  console.error('💚💚💚 calculateGradingResult CALLED 💚💚💚');
-  console.error('💚 parsedBedoemmelse:', parsedBedoemmelse);
-  console.error('💚 parsedBedoemmelse.dele:', parsedBedoemmelse?.dele);
-  console.error('💚 parsedBedoemmelse.dele.length:', parsedBedoemmelse?.dele?.length);
-  console.error('💚 aiGrading:', aiGrading);
-  console.error('💚 aiGrading.dele:', aiGrading?.dele);
-  console.error('💚 aiGrading.dele.length:', aiGrading?.dele?.length);
-  
   let samletKarakter = 0;
   
   const dele = parsedBedoemmelse.dele.map((del, delIdx) => {
     const aiDel = aiGrading.dele[delIdx];
-    console.error(`💚 Processing del ${delIdx}: ${del.navn}`);
-    console.error(`💚 Found aiDel:`, aiDel);
     if (!aiDel) {
       throw new Error(`AI mangler bedømmelse for del: ${del.navn}`);
     }

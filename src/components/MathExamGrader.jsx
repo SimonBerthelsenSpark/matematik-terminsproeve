@@ -156,8 +156,16 @@ export function MathExamGrader() {
                         
                         // Parse bedømmelseskema (check cache first)
                         let parsed = getCachedParsedBedoemmelse(exam);
-                        if (!parsed) {
-                            console.log('📋 Parsing bedømmelseskema...');
+                        
+                        // Validate cached version - if empty, re-parse
+                        const isCachedValid = parsed && parsed.dele && parsed.dele.length > 0;
+                        
+                        if (!parsed || !isCachedValid) {
+                            if (parsed && !isCachedValid) {
+                                console.log('⚠️ Cached parsed bedømmelseskema is invalid (empty), re-parsing...');
+                            } else {
+                                console.log('📋 Parsing bedømmelseskema...');
+                            }
                             setParsingBedoemmelse(true);
                             parsed = await parseDanskBedoemmelse(file);
                             // Save to Firestore for caching
@@ -622,10 +630,6 @@ export function MathExamGrader() {
                     const elevbesvarelse = await fileParsing.readFileContent(elevFile);
                     
                     // Validate parsedBedoemmelse before calling AI
-                    console.log('🔍 BEFORE AI CALL - parsedBedoemmelse:', parsedBedoemmelse);
-                    console.log('🔍 BEFORE AI CALL - parsedBedoemmelse.dele:', parsedBedoemmelse?.dele);
-                    console.log('🔍 BEFORE AI CALL - parsedBedoemmelse.dele.length:', parsedBedoemmelse?.dele?.length);
-                    
                     if (!parsedBedoemmelse || !parsedBedoemmelse.dele || parsedBedoemmelse.dele.length === 0) {
                         throw new Error('Bedømmelseskema er ikke korrekt indlæst. Genindlæs siden eller upload bedømmelseskemaet igen.');
                     }
@@ -668,11 +672,6 @@ export function MathExamGrader() {
             
             const allResults = [...existingResults, ...newlyGradedResults];
             
-            console.error('🎯 DANSK GRADING FINISHED!');
-            console.error('🎯 Newly graded results:', newlyGradedResults.length);
-            console.error('🎯 All results:', allResults.length);
-            console.error('🎯 First newly graded result:', newlyGradedResults[0]);
-            
             if (newlyGradedResults.length === 0) {
                 setDanskStatusMessage('ℹ️ Ingen nye prøver at rette - alle er allerede rettet!');
             } else {
@@ -693,11 +692,6 @@ export function MathExamGrader() {
      * Supports both Matematik and Dansk exams
      */
     const handleGradeAllExams = async () => {
-        console.error('🔥🔥🔥 GRADE ALL EXAMS CALLED - CODE VERSION 7ccbc56 🔥🔥🔥');
-        console.error('🔥 Exam type:', exam?.type);
-        console.error('🔥 Total submissions:', grading.documents.elevbesvarelser.length);
-        console.error('🔥 Already graded:', grading.results.length);
-        
         if (!examId) {
             grading.setError('Ingen eksamen valgt');
             return;
