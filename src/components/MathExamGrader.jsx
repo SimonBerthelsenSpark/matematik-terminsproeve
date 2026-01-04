@@ -679,6 +679,11 @@ export function MathExamGrader() {
      * Supports both Matematik and Dansk exams
      */
     const handleGradeAllExams = async () => {
+        console.error('🔥🔥🔥 GRADE ALL EXAMS CALLED - CODE VERSION 7ccbc56 🔥🔥🔥');
+        console.error('🔥 Exam type:', exam?.type);
+        console.error('🔥 Total submissions:', grading.documents.elevbesvarelser.length);
+        console.error('🔥 Already graded:', grading.results.length);
+        
         if (!examId) {
             grading.setError('Ingen eksamen valgt');
             return;
