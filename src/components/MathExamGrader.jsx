@@ -157,15 +157,27 @@ export function MathExamGrader() {
                         // Parse bedømmelseskema (check cache first)
                         let parsed = getCachedParsedBedoemmelse(exam);
                         
-                        // Validate cached version - if empty, re-parse
-                        const isCachedValid = parsed && parsed.dele && parsed.dele.length > 0;
+                        // Validate cached version - check for various issues
+                        let needsReparse = false;
                         
-                        if (!parsed || !isCachedValid) {
-                            if (parsed && !isCachedValid) {
-                                console.log('⚠️ Cached parsed bedømmelseskema is invalid (empty), re-parsing...');
-                            } else {
-                                console.log('📋 Parsing bedømmelseskema...');
-                            }
+                        if (!parsed || !parsed.dele || parsed.dele.length === 0) {
+                            needsReparse = true;
+                            console.log('⚠️ Cached parsed bedømmelseskema is empty');
+                        } else {
+                            // Check for invalid criteria (e.g., the long descriptive sentence bug)
+                            parsed.dele.forEach(del => {
+                                del.kriterier.forEach(krit => {
+                                    // If a criterion name is suspiciously long (likely a description, not a criterion)
+                                    if (krit.navn.split(' ').length > 10) {
+                                        needsReparse = true;
+                                        console.log(`⚠️ Found invalid criterion in cache: "${krit.navn.substring(0, 60)}..."`);
+                                    }
+                                });
+                            });
+                        }
+                        
+                        if (needsReparse) {
+                            console.log('🔄 Re-parsing bedømmelseskema with updated parser...');
                             setParsingBedoemmelse(true);
                             parsed = await parseDanskBedoemmelse(file);
                             // Save to Firestore for caching
