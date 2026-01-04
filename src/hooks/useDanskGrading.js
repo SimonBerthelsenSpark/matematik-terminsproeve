@@ -22,6 +22,20 @@ export async function bedoemDanskOpgave(
   onProgress = null
 ) {
   try {
+    // Validate parsedBedoemmelse before proceeding
+    console.log('🔍 VALIDATING parsedBedoemmelse:', parsedBedoemmelse);
+    console.log('🔍 parsedBedoemmelse.dele:', parsedBedoemmelse?.dele);
+    console.log('🔍 parsedBedoemmelse.dele.length:', parsedBedoemmelse?.dele?.length);
+    
+    if (!parsedBedoemmelse || !parsedBedoemmelse.dele || parsedBedoemmelse.dele.length === 0) {
+      throw new Error('Bedømmelseskema er tomt eller ikke korrekt parsed. Kontroller at bedømmelseskemaet indeholder kriterier med procent-angivelser.');
+    }
+    
+    // Log structure for debugging
+    parsedBedoemmelse.dele.forEach((del, idx) => {
+      console.log(`  Del ${idx + 1}: ${del.navn} (${del.totalVaegt}%) med ${del.kriterier.length} kriterier`);
+    });
+    
     // 1. Generer dynamisk prompt baseret på parsedBedoemmelse
     const { systemPrompt, userPrompt } = generateDynamicPrompt(
       parsedBedoemmelse,

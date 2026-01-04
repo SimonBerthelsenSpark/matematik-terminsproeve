@@ -621,6 +621,15 @@ export function MathExamGrader() {
                     setDanskStatusMessage(`📖 Læser ${elevFile.name} (${i + 1}/${grading.documents.elevbesvarelser.length})...`);
                     const elevbesvarelse = await fileParsing.readFileContent(elevFile);
                     
+                    // Validate parsedBedoemmelse before calling AI
+                    console.log('🔍 BEFORE AI CALL - parsedBedoemmelse:', parsedBedoemmelse);
+                    console.log('🔍 BEFORE AI CALL - parsedBedoemmelse.dele:', parsedBedoemmelse?.dele);
+                    console.log('🔍 BEFORE AI CALL - parsedBedoemmelse.dele.length:', parsedBedoemmelse?.dele?.length);
+                    
+                    if (!parsedBedoemmelse || !parsedBedoemmelse.dele || parsedBedoemmelse.dele.length === 0) {
+                        throw new Error('Bedømmelseskema er ikke korrekt indlæst. Genindlæs siden eller upload bedømmelseskemaet igen.');
+                    }
+                    
                     setDanskStatusMessage(`🤖 AI bedømmer ${elevFile.name}...`);
                     const result = await bedoemDanskOpgave(
                         parsedBedoemmelse,
