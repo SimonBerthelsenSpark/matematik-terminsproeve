@@ -359,10 +359,20 @@ function parseAIResponse(content) {
  * @returns {Object} Komplet grading result
  */
 function calculateGradingResult(parsedBedoemmelse, aiGrading, elevNavn, submissionId) {
+  console.error('💚💚💚 calculateGradingResult CALLED 💚💚💚');
+  console.error('💚 parsedBedoemmelse:', parsedBedoemmelse);
+  console.error('💚 parsedBedoemmelse.dele:', parsedBedoemmelse?.dele);
+  console.error('💚 parsedBedoemmelse.dele.length:', parsedBedoemmelse?.dele?.length);
+  console.error('💚 aiGrading:', aiGrading);
+  console.error('💚 aiGrading.dele:', aiGrading?.dele);
+  console.error('💚 aiGrading.dele.length:', aiGrading?.dele?.length);
+  
   let samletKarakter = 0;
   
   const dele = parsedBedoemmelse.dele.map((del, delIdx) => {
     const aiDel = aiGrading.dele[delIdx];
+    console.error(`💚 Processing del ${delIdx}: ${del.navn}`);
+    console.error(`💚 Found aiDel:`, aiDel);
     if (!aiDel) {
       throw new Error(`AI mangler bedømmelse for del: ${del.navn}`);
     }
