@@ -715,6 +715,11 @@ export function MathExamGrader() {
         
         if (newResults.length > 0) {
             try {
+                console.warn('🚨🚨🚨 SIMON TEST: SAVING RESULTS STARTED 🚨🚨🚨');
+                console.warn('🚨 Number of new results to save:', newResults.length);
+                console.warn('🚨 Exam type:', exam?.type);
+                console.warn('🚨 First result:', newResults[0]);
+                
                 setUploadStatus(`💾 Gemmer ${newResults.length} nye resultater til database...`);
                 
                 let savedCount = 0;
