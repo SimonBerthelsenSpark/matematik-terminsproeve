@@ -55,7 +55,7 @@ export const handler = async (event, context) => {
         { role: "system", content: optimizedSystemPrompt },
         { role: "user", content: userPrompt }
       ],
-      max_tokens: 8000,  // Increased significantly for Dansk grading with multiple criteria
+      max_tokens: 16000,  // Increased for complex Dansk grading with many criteria
       temperature: 0.2,  // Reduced from 0.3 for more deterministic, faster responses
       top_p: 0.9,       // Reduced from 0.95 to speed up generation
       stream: true,  // Enable streaming to prevent timeout
@@ -65,7 +65,7 @@ export const handler = async (event, context) => {
     };
 
     console.log('🔐 Calling AI API securely from Netlify Function with streaming');
-    console.log('⚡ Max tokens: 4000 (optimized for complete responses)');
+    console.log('⚡ Max tokens: 16000 (optimized for complex Dansk grading)');
     
     // Create AbortController for timeout handling (26s provides safety margin under Netlify's 30s limit)
     const abortController = new AbortController();

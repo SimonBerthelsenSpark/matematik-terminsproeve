@@ -87,15 +87,17 @@ function generateDynamicPrompt(parsedBedoemmelse, elevbesvarelse, elevNavn) {
 Din opgave er at bedømme elevbesvarelsen baseret PRÆCIST på de givne kriterier.
 
 For HVERT kriterium skal du:
-1. Giv en delkarakter på 7-trins skalaen: -3, 00, 02, 4, 7, 10, 12
+1. Giv en delkarakter på 7-trins skalaen: -3, 0, 2, 4, 7, 10, 12
 2. Giv KORT, konkret feedback (MAX 2-3 sætninger)
 
 VIGTIGE REGLER:
-- Brug KUN de 7 gyldige karakterer: -3, 00, 02, 4, 7, 10, 12
+- Brug KUN de 7 gyldige karakterer: -3, 0, 2, 4, 7, 10, 12
+- KRITISK: Brug 0 (IKKE 00) og 2 (IKKE 02) - ingen leading zeros!
 - Ingen andre tal er tilladt
 - Hold feedback KORT og specifik
 - ALTID returner KOMPLET og VALID JSON
 - Brug PRÆCIS det elevnavn der gives: "${elevNavn}"
+- ALDRIG afbryd JSON midt i - færdiggør altid hele strukturen
 
 RETURNER JSON med denne struktur:
 {
@@ -113,7 +115,9 @@ RETURNER JSON med denne struktur:
     }
   ],
   "samletVurdering": "Kort overordnet vurdering (max 200 ord)"
-}`;
+}
+
+EKSTRA VIGTIG INSTRUKTION: Du SKAL færdiggøre HELE JSON strukturen. Hvis du løber tør for plads, FORKORT feedback i stedet for at afbryde JSON. Hver feedback må max være 5 ord hvis nødvendigt.`;
 
   // Byg user prompt med alle dele og kriterier DYNAMISK
   let userPrompt = `Bedøm følgende elevbesvarelse baseret på PRÆCIS disse kriterier fra bedømmelseskemaet:\n\n`;
@@ -205,6 +209,11 @@ function parseAIResponse(content) {
     
     let jsonText = jsonMatch[0];
     
+    // FIX: Replace invalid number formats like "delKarakter": 00 with "delKarakter": 0
+    // This is a common AI error where it outputs 00 instead of 0
+    jsonText = jsonText.replace(/"delKarakter"\s*:\s*00([,\s\}])/g, '"delKarakter": 0$1');
+    jsonText = jsonText.replace(/"delKarakter"\s*:\s*02([,\s\}])/g, '"delKarakter": 2$1');
+    
     // ULTRA-ROBUST JSON REPAIR for truncated AI responses
     // This handles the case where AI response is cut mid-string like: "feedback": "Struktur
     console.log('🔍 Checking JSON integrity...');
@@ -218,9 +227,11 @@ function parseAIResponse(content) {
     try {
       JSON.parse(jsonText);
       console.log('✅ JSON is valid, no repair needed');
+      console.log('📏 JSON contains', (jsonText.match(/"delKarakter"/g) || []).length, 'criteria');
       repaired = true;
     } catch (initialError) {
       console.warn('⚠️ JSON appears corrupted/truncated:', initialError.message);
+      console.warn('📍 Error at position:', initialError.message.match(/position (\d+)/)?.[1]);
       console.log('🔧 Attempting to repair...');
       
       // STRATEGY: Find last COMPLETE property-value pair
