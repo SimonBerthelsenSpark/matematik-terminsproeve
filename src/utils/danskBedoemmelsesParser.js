@@ -31,18 +31,115 @@ export async function parseDanskBedoemmelse(file) {
     console.log('📄 Extracted text length:', text.length);
     console.log('📄 First 500 chars:', text.substring(0, 500));
     
-    // Parse dynamisk struktur fra tekst
+    // Try AI-powered parsing first (more robust and generic)
+    try {
+      console.log('🤖 Attempting AI-powered parsing...');
+      const aiParsed = await parseWithAI(text);
+      if (aiParsed && aiParsed.dele && aiParsed.dele.length > 0) {
+        console.log('✅ Successfully AI-parsed bedømmelseskema:', aiParsed);
+        validateTotalWeight(aiParsed);
+        return aiParsed;
+      }
+    } catch (aiError) {
+      console.warn('⚠️ AI parsing failed, falling back to rule-based parsing:', aiError.message);
+    }
+    
+    // Fallback to rule-based parsing
     const parsedData = parseTextStructure(text);
-    
-    // Valider total vægt
     validateTotalWeight(parsedData);
-    
     console.log('✅ Successfully parsed bedømmelseskema:', parsedData);
     
     return parsedData;
   } catch (error) {
     console.error('❌ Error parsing bedømmelseskema:', error);
     throw new Error(`Kunne ikke parse bedømmelseskema: ${error.message}`);
+  }
+}
+
+/**
+ * Parse bedømmelseskema using AI (most robust and generic)
+ * @param {string} text - Raw text from document
+ * @returns {Promise<Object>} Parsed bedømmelseskema structure
+ */
+async function parseWithAI(text) {
+  const systemPrompt = `Du er en ekspert i at analysere danske bedømmelseskemaer.
+
+Din opgave er at udtrække ALLE bedømmelseskriterier fra teksten og returnere dem i JSON format.
+
+VIGTIGE REGLER:
+1. Find ALLE sektioner/dele i dokumentet (f.eks. "Del B", "Del C", eller nummererede sektioner)
+2. For hver sektion, find ALLE kriterier
+3. Ignorer introduktionstekst og forklaringer - kun faktiske kriterier
+4. Hvis ingen procent-vægte er angivet, sæt alle til null (auto-tildeles senere)
+5. Uddrag beskrivelser fra bullet points under hvert kriterium
+
+RETURNER JSON med denne struktur:
+{
+  "dele": [
+    {
+      "navn": "Sektionsnavn",
+      "totalVaegt": null,
+      "kriterier": [
+        {
+          "navn": "Kriterienavn",
+          "vaegt": null,
+          "beskrivelse": "Beskrivelse af kriteriet fra dokumentet"
+        }
+      ]
+    }
+  ]
+}`;
+
+  const userPrompt = `Analyser følgende bedømmelseskema og udtræk ALLE kriterier:
+
+${text}
+
+Returner JSON strukturen.`;
+
+  try {
+    const response = await fetch('/.netlify/functions/grade-exam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt,
+        userPrompt,
+        apiProvider: 'openai'
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Unknown AI error');
+    }
+
+    const content = data.data.choices[0].message.content;
+    
+    // Extract JSON from response
+    let cleanContent = content.trim();
+    cleanContent = cleanContent.replace(/^```json\s*/i, '');
+    cleanContent = cleanContent.replace(/^```\s*/i, '');
+    cleanContent = cleanContent.replace(/\s*```$/i, '');
+    
+    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in AI response');
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    
+    // Validate structure
+    if (!parsed.dele || !Array.isArray(parsed.dele)) {
+      throw new Error('Invalid structure from AI');
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error('AI parsing error:', error);
+    throw error;
   }
 }
 
