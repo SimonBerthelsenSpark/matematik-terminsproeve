@@ -32,20 +32,23 @@ export async function parseDanskBedoemmelse(file) {
     console.log('📄 First 500 chars:', text.substring(0, 500));
     
     // Try AI-powered parsing first (more robust and generic)
+    let parsedData;
     try {
       console.log('🤖 Attempting AI-powered parsing...');
-      const aiParsed = await parseWithAI(text);
-      if (aiParsed && aiParsed.dele && aiParsed.dele.length > 0) {
-        console.log('✅ Successfully AI-parsed bedømmelseskema:', aiParsed);
-        validateTotalWeight(aiParsed);
-        return aiParsed;
+      parsedData = await parseWithAI(text);
+      if (!parsedData || !parsedData.dele || parsedData.dele.length === 0) {
+        throw new Error('AI parsing returned empty result');
       }
+      console.log('✅ Successfully AI-parsed bedømmelseskema');
     } catch (aiError) {
       console.warn('⚠️ AI parsing failed, falling back to rule-based parsing:', aiError.message);
+      // Fallback to rule-based parsing
+      parsedData = parseTextStructure(text);
     }
     
-    // Fallback to rule-based parsing
-    const parsedData = parseTextStructure(text);
+    // CRITICAL: Auto-assign weights if missing (works for BOTH AI and rule-based parsing)
+    parsedData = assignWeightsIfMissing(parsedData);
+    
     validateTotalWeight(parsedData);
     console.log('✅ Successfully parsed bedømmelseskema:', parsedData);
     
@@ -179,6 +182,48 @@ async function parsePDFDocument(file) {
 }
 
 /**
+ * Auto-assign weights to sections and criteria if missing
+ * @param {Object} parsedData - Parsed bedømmelseskema
+ * @returns {Object} parsedData with weights assigned
+ */
+function assignWeightsIfMissing(parsedData) {
+  if (!parsedData || !parsedData.dele || parsedData.dele.length === 0) {
+    return parsedData;
+  }
+  
+  // First, assign section weights if missing
+  const sectionsWithoutWeight = parsedData.dele.filter(d => !d.totalVaegt);
+  if (sectionsWithoutWeight.length > 0) {
+    console.log(`📊 Auto-assigning equal section weights to ${sectionsWithoutWeight.length} sections`);
+    const equalSectionWeight = 100 / parsedData.dele.length;
+    parsedData.dele.forEach(del => {
+      if (!del.totalVaegt) {
+        del.totalVaegt = equalSectionWeight;
+        console.log(`   - ${del.navn}: ${equalSectionWeight.toFixed(2)}%`);
+      }
+    });
+  }
+  
+  // Then, assign criterion weights within each section if missing
+  parsedData.dele.forEach(del => {
+    const hasNullWeights = del.kriterier.some(k => k.vaegt === null || k.vaegt === undefined);
+    
+    if (hasNullWeights) {
+      console.log(`📊 Auto-assigning equal weights for del: ${del.navn}`);
+      const equalWeight = del.totalVaegt / del.kriterier.length;
+      del.kriterier.forEach(krit => {
+        if (krit.vaegt === null || krit.vaegt === undefined) {
+          krit.vaegt = equalWeight;
+          console.log(`   - ${krit.navn}: ${equalWeight.toFixed(2)}%`);
+        }
+      });
+    }
+  });
+  
+  return parsedData;
+}
+
+/**
  * Parse tekststruktur dynamisk for at finde dele og kriterier
  * INGEN hardcoded kategorinavne - finder alt dynamisk
  * @param {string} text - Rå tekst fra dokument
@@ -237,39 +282,6 @@ function parseTextStructure(text) {
         totalVaegt: totalVaegt,  // Keep null if not specified - will be auto-assigned later
         kriterier
       });
-    }
-  });
-  
-  // Auto-assign equal weights to sections if not specified
-  const sectionsWithoutWeight = dele.filter(d => !d.totalVaegt);
-  if (sectionsWithoutWeight.length > 0) {
-    console.log(`📊 Auto-assigning equal section weights to ${sectionsWithoutWeight.length} sections`);
-    const equalSectionWeight = 100 / dele.length;
-    sectionsWithoutWeight.forEach(del => {
-      del.totalVaegt = equalSectionWeight;
-      console.log(`   - ${del.navn}: ${equalSectionWeight.toFixed(2)}%`);
-    });
-  }
-  
-  // Auto-assign weights if criteria don't have them
-  dele.forEach(del => {
-    // Check if any criterion is missing weight
-    const hasNullWeights = del.kriterier.some(k => k.vaegt === null || k.vaegt === undefined);
-    
-    if (hasNullWeights) {
-      console.log(`📊 Auto-assigning equal weights for del: ${del.navn}`);
-      const equalWeight = del.totalVaegt / del.kriterier.length;
-      del.kriterier.forEach(krit => {
-        if (krit.vaegt === null || krit.vaegt === undefined) {
-          krit.vaegt = equalWeight;
-          console.log(`   - ${krit.navn}: ${equalWeight.toFixed(2)}%`);
-        }
-      });
-    }
-    
-    // If total vægt ikke er angivet, beregn fra kriterier
-    if (!del.totalVaegt) {
-      del.totalVaegt = calculateTotalVaegtFromKriterier(del.kriterier);
     }
   });
   

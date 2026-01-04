@@ -375,8 +375,6 @@ function parseAIResponse(content) {
  * @returns {Object} Komplet grading result
  */
 function calculateGradingResult(parsedBedoemmelse, aiGrading, elevNavn, submissionId) {
-  console.log('🔍 calculateGradingResult - parsedBedoemmelse:', JSON.stringify(parsedBedoemmelse, null, 2));
-  
   let samletKarakter = 0;
   
   const dele = parsedBedoemmelse.dele.map((del, delIdx) => {
@@ -400,18 +398,9 @@ function calculateGradingResult(parsedBedoemmelse, aiGrading, elevNavn, submissi
         aiKrit.delKarakter = 0;
       }
       
-      // CRITICAL: Check if weight is valid
-      if (!krit.vaegt || krit.vaegt === null || krit.vaegt === undefined) {
-        console.error(`❌ CRITICAL: Kriterium "${krit.navn}" har ingen vægt!`);
-        console.error(`   krit.vaegt = ${krit.vaegt}`);
-        throw new Error(`Kriterium "${krit.navn}" mangler vægt. Parser fejlede?`);
-      }
-      
       // Beregn vægtet score
       const vaegtetScore = (aiKrit.delKarakter * krit.vaegt) / 100;
       delTotal += vaegtetScore;
-      
-      console.log(`   Kriterium: ${krit.navn}, vægt: ${krit.vaegt}%, karakter: ${aiKrit.delKarakter}, vægtet: ${vaegtetScore.toFixed(2)}`);
       
       return {
         navn: krit.navn,
