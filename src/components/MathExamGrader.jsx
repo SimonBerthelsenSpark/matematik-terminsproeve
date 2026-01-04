@@ -622,16 +622,17 @@ export function MathExamGrader() {
     
     /**
      * Grade Dansk exams using dynamic bedømmelseskema
+     * Returns the newly graded results array
      */
     const handleGradeDanskExams = async () => {
         if (!parsedBedoemmelse) {
             grading.setError('Bedømmelseskema ikke parsed endnu. Upload bedømmelseskema først.');
-            return;
+            return [];
         }
         
         if (grading.documents.elevbesvarelser.length === 0) {
             grading.setError('Upload elevbesvarelser først');
-            return;
+            return [];
         }
         
         setDanskGrading(true);
@@ -710,8 +711,12 @@ export function MathExamGrader() {
             
             grading.setResults(allResults);
             
+            // Return newly graded results for saving
+            return newlyGradedResults;
+            
         } catch (err) {
             grading.setError(err.message);
+            return [];
         } finally {
             setDanskGrading(false);
         }
@@ -739,10 +744,11 @@ export function MathExamGrader() {
         // Store the count of results before grading
         const resultsBeforeGrading = grading.results.length;
         
-        // Branch based on exam type
+        // Branch based on exam type and get new results
+        let newResults = [];
         if (exam?.type === 'Dansk') {
-            // DANSK GRADING FLOW
-            await handleGradeDanskExams();
+            // DANSK GRADING FLOW - returns newly graded results
+            newResults = await handleGradeDanskExams();
         } else {
             // MATEMATIK GRADING FLOW (original logic)
             if (!grading.canProceed()) {
@@ -750,11 +756,11 @@ export function MathExamGrader() {
                 return;
             }
             await grading.gradeAllExams();
+            
+            // For Matematik, calculate new results from state
+            const allResults = grading.results;
+            newResults = allResults.slice(resultsBeforeGrading);
         }
-        
-        // After grading completes, save ONLY NEW results to database
-        const allResults = grading.results;
-        const newResults = allResults.slice(resultsBeforeGrading); // Only the newly graded ones
         
         if (newResults.length > 0) {
             try {
