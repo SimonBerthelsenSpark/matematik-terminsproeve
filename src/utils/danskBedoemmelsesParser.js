@@ -137,14 +137,40 @@ function parseTextStructure(text) {
     if (kriterier.length > 0) {
       dele.push({
         navn: delNavn,
-        totalVaegt: totalVaegt || calculateTotalVaegtFromKriterier(kriterier),
+        totalVaegt: totalVaegt,  // Keep null if not specified - will be auto-assigned later
         kriterier
       });
     }
   });
   
-  // Hvis total vægt ikke er angivet, beregn fra kriterier
+  // Auto-assign equal weights to sections if not specified
+  const sectionsWithoutWeight = dele.filter(d => !d.totalVaegt);
+  if (sectionsWithoutWeight.length > 0) {
+    console.log(`📊 Auto-assigning equal section weights to ${sectionsWithoutWeight.length} sections`);
+    const equalSectionWeight = 100 / dele.length;
+    sectionsWithoutWeight.forEach(del => {
+      del.totalVaegt = equalSectionWeight;
+      console.log(`   - ${del.navn}: ${equalSectionWeight.toFixed(2)}%`);
+    });
+  }
+  
+  // Auto-assign weights if criteria don't have them
   dele.forEach(del => {
+    // Check if any criterion is missing weight
+    const hasNullWeights = del.kriterier.some(k => k.vaegt === null || k.vaegt === undefined);
+    
+    if (hasNullWeights) {
+      console.log(`📊 Auto-assigning equal weights for del: ${del.navn}`);
+      const equalWeight = del.totalVaegt / del.kriterier.length;
+      del.kriterier.forEach(krit => {
+        if (krit.vaegt === null || krit.vaegt === undefined) {
+          krit.vaegt = equalWeight;
+          console.log(`   - ${krit.navn}: ${equalWeight.toFixed(2)}%`);
+        }
+      });
+    }
+    
+    // If total vægt ikke er angivet, beregn fra kriterier
     if (!del.totalVaegt) {
       del.totalVaegt = calculateTotalVaegtFromKriterier(del.kriterier);
     }
@@ -163,48 +189,24 @@ function parseTextStructure(text) {
 function parseKriterierFromText(text, start, end) {
   const kriterier = [];
   const sectionText = text.substring(start, end);
-  
-  // Find alle linjer med procent-angivelse
-  // Matcher f.eks:
-  // - "Genre & layout (7,5%)"
-  // - "Modtagerrettethed 7.5%"
-  // - "Struktur: 6%"
   const lines = sectionText.split('\n');
   
   console.log(`🔍 Parsing ${lines.length} lines for criteria...`);
   
+  // FIRST ATTEMPT: Parse with percentages (existing logic)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
-    // Skip tomme linjer
-    if (!line) {
-      continue;
-    }
+    if (!line) continue;
+    if (line.match(/^(?:Del|Afsnit|Part)\s+[A-Z]/i)) continue;
     
-    // Skip del-overskrifter (men IKKE numbered items som "1. Genre")
-    if (line.match(/^(?:Del|Afsnit|Part)\s+[A-Z]/i)) {
-      continue;
-    }
-    
-    // Tjek om linjen indeholder en procentsats
-    // More flexible regex that handles: (7.5%), 7.5%, (7,5%), etc.
     const percentMatch = line.match(/\(?\s*(\d+(?:[.,]\d+)?)\s*%\s*\)?/);
-    if (!percentMatch) {
-      continue;
-    }
+    if (!percentMatch) continue;
     
     const vaegt = parseFloat(percentMatch[1].replace(',', '.'));
-    
-    // Udtræk kriterie-navn (alt før procentsatsen)
     let navn = line.substring(0, line.indexOf(percentMatch[0])).trim();
-    
-    // Remove leading numbers (e.g., "1." or "1)")
     navn = navn.replace(/^\d+[.)]\s*/, '').trim();
-    
-    // Fjern almindelige separatorer
     navn = navn.replace(/[:\-–—]\s*$/, '').trim();
-    
-    // Remove any trailing parentheses content that might be left
     navn = navn.replace(/\([^)]*$/, '').trim();
     
     if (!navn) {
@@ -212,29 +214,103 @@ function parseKriterierFromText(text, start, end) {
       continue;
     }
     
-    console.log(`✓ Found criterion: "${navn}" (${vaegt}%)`);
+    console.log(`✓ Found criterion WITH percentage: "${navn}" (${vaegt}%)`);
     
-    // Find beskrivelse (næste linjer indtil næste kriterium eller del)
     let beskrivelse = '';
     let j = i + 1;
     let descriptionLines = 0;
-    while (j < lines.length && descriptionLines < 100) { // Safety limit
+    while (j < lines.length && descriptionLines < 100) {
+      const nextLine = lines[j].trim();
+      if (nextLine.match(/\d+(?:[.,]\d+)?\s*%/)) break;
+      if (nextLine.match(/^(?:Del|Afsnit|Part)\s+[A-Z]/i) || nextLine.match(/^\d+\.\s+[A-Z]/)) break;
+      if (!nextLine && beskrivelse && j + 1 < lines.length && !lines[j + 1].trim()) break;
+      
+      if (nextLine) {
+        beskrivelse += (beskrivelse ? ' ' : '') + nextLine;
+        descriptionLines++;
+      }
+      j++;
+    }
+    
+    beskrivelse = beskrivelse.substring(0, 500).trim();
+    kriterier.push({
+      navn,
+      vaegt,
+      beskrivelse: beskrivelse || `Bedømmelseskriterium for ${navn}`
+    });
+  }
+  
+  // FALLBACK: If no percentages found, parse numbered or colon-based criteria
+  if (kriterier.length === 0) {
+    console.warn('⚠️ No percentage-based criteria found, using fallback parsing...');
+    kriterier.push(...parseKriterierWithoutPercentages(lines));
+  }
+  
+  console.log(`🔍 Found ${kriterier.length} kriterier in section`);
+  if (kriterier.length === 0) {
+    console.warn(`⚠️ No criteria found. Sample lines:`, lines.slice(0, 10));
+  }
+  
+  return kriterier;
+}
+
+/**
+ * Fallback parsing for documents without percentages
+ * Looks for numbered criteria (1., 2., etc.) or colon-based criteria
+ * @param {Array} lines - Array of text lines
+ * @returns {Array} Array of criteria (without weights - will be assigned later)
+ */
+function parseKriterierWithoutPercentages(lines) {
+  const kriterier = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    // Skip section headers (Del A, Del B, etc.)
+    if (line.match(/^(?:Del|Afsnit|Part)\s+[A-Z]/i)) continue;
+    
+    let criterionName = null;
+    
+    // Pattern 1: Numbered criteria like "1. Genre og Layout"
+    const numberedMatch = line.match(/^(\d+)\.\s+(.+?)(?:\s*\([^)]*\))?$/);
+    if (numberedMatch) {
+      criterionName = numberedMatch[2].trim();
+      // Remove trailing colon if present
+      criterionName = criterionName.replace(/:\s*$/, '').trim();
+    }
+    
+    // Pattern 2: Colon-based criteria like "Indhold og opgavebesvarelse:"
+    if (!criterionName && line.match(/^[A-ZÆØÅ]/)) {  // Starts with capital letter
+      const colonMatch = line.match(/^([^:]+):\s*$/);
+      if (colonMatch) {
+        criterionName = colonMatch[1].trim();
+      }
+    }
+    
+    if (!criterionName) continue;
+    
+    console.log(`✓ Found criterion WITHOUT percentage: "${criterionName}"`);
+    
+    // Collect description from following lines until next criterion
+    let beskrivelse = '';
+    let j = i + 1;
+    let descriptionLines = 0;
+    
+    while (j < lines.length && descriptionLines < 100) {
       const nextLine = lines[j].trim();
       
-      // Stop hvis vi når næste kriterium (linje med procent)
-      if (nextLine.match(/\d+(?:[.,]\d+)?\s*%/)) {
-        break;
-      }
+      // Stop at next numbered criterion
+      if (nextLine.match(/^\d+\.\s+[A-Z]/)) break;
       
-      // Stop hvis vi når en ny del eller numbered section
-      if (nextLine.match(/^(?:Del|Afsnit|Part)\s+[A-Z]/i) || nextLine.match(/^\d+\.\s+[A-Z]/)) {
-        break;
-      }
+      // Stop at next colon-based criterion
+      if (nextLine.match(/^[A-ZÆØÅ][^:]+:\s*$/)) break;
       
-      // Stop hvis vi har tom linje OG allerede har beskrivelse OG næste linje også er tom
-      if (!nextLine && beskrivelse && j + 1 < lines.length && !lines[j + 1].trim()) {
-        break;
-      }
+      // Stop at section header
+      if (nextLine.match(/^(?:Del|Afsnit|Part)\s+[A-Z]/i)) break;
+      
+      // Stop at double empty line
+      if (!nextLine && beskrivelse && j + 1 < lines.length && !lines[j + 1].trim()) break;
       
       if (nextLine) {
         beskrivelse += (beskrivelse ? ' ' : '') + nextLine;
@@ -244,19 +320,13 @@ function parseKriterierFromText(text, start, end) {
       j++;
     }
     
-    // Trim description and limit length
     beskrivelse = beskrivelse.substring(0, 500).trim();
     
     kriterier.push({
-      navn,
-      vaegt,
-      beskrivelse: beskrivelse || `Bedømmelseskriterium for ${navn}`
+      navn: criterionName,
+      vaegt: null,  // Will be assigned equal weights later
+      beskrivelse: beskrivelse || `Bedømmelseskriterium for ${criterionName}`
     });
-  }
-  
-  console.log(`🔍 Found ${kriterier.length} kriterier in section`);
-  if (kriterier.length === 0) {
-    console.warn(`⚠️ No criteria found. Sample lines:`, lines.slice(0, 10));
   }
   
   return kriterier;
