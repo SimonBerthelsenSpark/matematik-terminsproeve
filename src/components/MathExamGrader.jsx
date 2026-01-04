@@ -164,9 +164,20 @@ export function MathExamGrader() {
                             needsReparse = true;
                             console.log('⚠️ Cached parsed bedømmelseskema is empty');
                         } else {
-                            // Check for invalid criteria (e.g., the long descriptive sentence bug)
+                            // Check for invalid criteria or missing weights
                             parsed.dele.forEach(del => {
+                                // Check if section weight is missing
+                                if (del.totalVaegt === null || del.totalVaegt === undefined) {
+                                    needsReparse = true;
+                                    console.log(`⚠️ Found section without weight: "${del.navn}"`);
+                                }
+                                
                                 del.kriterier.forEach(krit => {
+                                    // Check if criterion weight is missing
+                                    if (krit.vaegt === null || krit.vaegt === undefined) {
+                                        needsReparse = true;
+                                        console.log(`⚠️ Found criterion without weight: "${krit.navn}"`);
+                                    }
                                     // If a criterion name is suspiciously long (likely a description, not a criterion)
                                     if (krit.navn.split(' ').length > 10) {
                                         needsReparse = true;
