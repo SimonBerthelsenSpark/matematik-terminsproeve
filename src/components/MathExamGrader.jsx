@@ -659,6 +659,11 @@ export function MathExamGrader() {
             
             const allResults = [...existingResults, ...newlyGradedResults];
             
+            console.error('🎯 DANSK GRADING FINISHED!');
+            console.error('🎯 Newly graded results:', newlyGradedResults.length);
+            console.error('🎯 All results:', allResults.length);
+            console.error('🎯 First newly graded result:', newlyGradedResults[0]);
+            
             if (newlyGradedResults.length === 0) {
                 setDanskStatusMessage('ℹ️ Ingen nye prøver at rette - alle er allerede rettet!');
             } else {
