@@ -992,39 +992,42 @@ export function MathExamGrader() {
                     <div className="flex items-center justify-between mb-4">
                         {/* File Links */}
                         <div className="flex items-center gap-3 text-sm">
-                            {/* Matematik: Rettevejledning */}
-                            {exam?.type === 'Matematik' && exam?.rettevejledningRef && (
-                                <a
-                                    href="#"
-                                    onClick={async (e) => {
-                                        e.preventDefault();
-                                        const url = await getFileDownloadURL(exam.rettevejledningRef.storagePath);
-                                        window.open(url, '_blank');
-                                    }}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors"
-                                >
-                                    <FileText className="w-4 h-4" />
-                                    <span>Rettevejledning</span>
-                                    <ExternalLink className="w-3 h-3" />
-                                </a>
+                            {/* Matematik: Show Rettevejledning and Omsætningstabel */}
+                            {exam?.type === 'Matematik' && (
+                                <>
+                                    {exam?.rettevejledningRef && (
+                                        <a
+                                            href="#"
+                                            onClick={async (e) => {
+                                                e.preventDefault();
+                                                const url = await getFileDownloadURL(exam.rettevejledningRef.storagePath);
+                                                window.open(url, '_blank');
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors"
+                                        >
+                                            <FileText className="w-4 h-4" />
+                                            <span>Rettevejledning</span>
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    )}
+                                    {exam?.omsætningstabelRef && (
+                                        <a
+                                            href="#"
+                                            onClick={async (e) => {
+                                                e.preventDefault();
+                                                const url = await getFileDownloadURL(exam.omsætningstabelRef.storagePath);
+                                                window.open(url, '_blank');
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition-colors"
+                                        >
+                                            <FileText className="w-4 h-4" />
+                                            <span>Omsætningstabel</span>
+                                            <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                    )}
+                                </>
                             )}
-                            {/* Matematik: Omsætningstabel */}
-                            {exam?.type === 'Matematik' && exam?.omsætningstabelRef && (
-                                <a
-                                    href="#"
-                                    onClick={async (e) => {
-                                        e.preventDefault();
-                                        const url = await getFileDownloadURL(exam.omsætningstabelRef.storagePath);
-                                        window.open(url, '_blank');
-                                    }}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition-colors"
-                                >
-                                    <FileText className="w-4 h-4" />
-                                    <span>Omsætningstabel</span>
-                                    <ExternalLink className="w-3 h-3" />
-                                </a>
-                            )}
-                            {/* Dansk: Bedømmelseskema */}
+                            {/* Dansk: Only show Bedømmelseskema */}
                             {exam?.type === 'Dansk' && exam?.bedoemmelseskemaRef && (
                                 <a
                                     href="#"

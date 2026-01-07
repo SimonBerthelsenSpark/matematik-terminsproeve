@@ -744,15 +744,23 @@ export async function recalculateExamStats(examId) {
       return;
     }
     
+    // Detect exam type from first result
+    const isDansk = results[0]?.aiGrading?.dele && Array.isArray(results[0].aiGrading.dele);
+    
     let totalPoints = 0;
     let totalGrades = 0;
     let count = 0;
     
     results.forEach(result => {
       if (result.finalGrade) {
-        // Handle both Matematik (totalPoint/karakter) and Dansk (afrundetKarakter/samletKarakter)
-        totalPoints += result.finalGrade.totalPoint || result.finalGrade.samletKarakter || 0;
-        totalGrades += result.finalGrade.karakter || result.finalGrade.afrundetKarakter || 0;
+        if (isDansk) {
+          // DANSK: Only calculate average grade (no points)
+          totalGrades += result.finalGrade.afrundetKarakter || 0;
+        } else {
+          // MATEMATIK: Calculate both points and grade
+          totalPoints += result.finalGrade.totalPoint || 0;
+          totalGrades += result.finalGrade.karakter || 0;
+        }
         count++;
       }
     });
@@ -762,10 +770,12 @@ export async function recalculateExamStats(examId) {
     
     await updateExamStats(examId, {
       gradedCount: count,
-      averagePoints: Math.round(averagePoints * 10) / 10,  // Round to 1 decimal
+      averagePoints: isDansk ? 0 : Math.round(averagePoints * 10) / 10,  // 0 for Dansk, calculated for Matematik
       averageGrade: Math.round(averageGrade * 10) / 10,
       lastGradedAt: true  // Will be converted to serverTimestamp
     });
+    
+    console.log(`📊 Updated exam stats: gradedCount=${count}, averagePoints=${isDansk ? 0 : Math.round(averagePoints * 10) / 10}, averageGrade=${Math.round(averageGrade * 10) / 10}`);
   } catch (error) {
     console.error('Error recalculating exam stats:', error);
     throw new Error(`Failed to recalculate exam stats: ${error.message}`);

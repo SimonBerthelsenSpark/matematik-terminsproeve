@@ -210,6 +210,8 @@ function ExamCard({ exam, onOpen, onDelete, isDeleting, formatDate, getTypeBadge
   const stats = exam.stats || {};
   const hasRettevejledning = exam.rettevejledningRef ? true : false;
   const hasOmsaetningstabel = exam.omsætningstabelRef ? true : false;
+  const hasBedoemmelseskema = exam.bedoemmelseskemaRef ? true : false;
+  const isDansk = exam.type === 'Dansk';
 
   const handleCardClick = (e) => {
     // Don't open if clicking action buttons or delete button
@@ -284,22 +286,37 @@ function ExamCard({ exam, onOpen, onDelete, isDeleting, formatDate, getTypeBadge
       <div className="mb-4 p-3 bg-gray-50 rounded-lg">
         <p className="text-xs font-semibold text-gray-700 mb-2">📄 Filer:</p>
         <div className="space-y-1 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-600">Rettevejledning</span>
-            {hasRettevejledning ? (
-              <CheckCircle className="w-4 h-4 text-green-600" />
-            ) : (
-              <X className="w-4 h-4 text-red-400" />
-            )}
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-gray-600">Omsætningstabel</span>
-            {hasOmsaetningstabel ? (
-              <CheckCircle className="w-4 h-4 text-green-600" />
-            ) : (
-              <X className="w-4 h-4 text-red-400" />
-            )}
-          </div>
+          {isDansk ? (
+            /* Dansk: Only show bedømmelseskema */
+            <div className="flex items-center justify-between">
+              <span className="text-gray-600">Bedømmelseskema</span>
+              {hasBedoemmelseskema ? (
+                <CheckCircle className="w-4 h-4 text-green-600" />
+              ) : (
+                <X className="w-4 h-4 text-red-400" />
+              )}
+            </div>
+          ) : (
+            /* Matematik: Show rettevejledning and omsætningstabel */
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Rettevejledning</span>
+                {hasRettevejledning ? (
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                ) : (
+                  <X className="w-4 h-4 text-red-400" />
+                )}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Omsætningstabel</span>
+                {hasOmsaetningstabel ? (
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                ) : (
+                  <X className="w-4 h-4 text-red-400" />
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -332,14 +349,16 @@ function ExamCard({ exam, onOpen, onDelete, isDeleting, formatDate, getTypeBadge
                 : '-'}
             </p>
           </div>
-          <div>
-            <p className="text-gray-500">Gns. point</p>
-            <p className="font-bold text-gray-800">
-              {stats.averagePoints
-                ? stats.averagePoints.toFixed(1)
-                : '-'}
-            </p>
-          </div>
+          {!isDansk && (
+            <div>
+              <p className="text-gray-500">Gns. point</p>
+              <p className="font-bold text-gray-800">
+                {stats.averagePoints
+                  ? stats.averagePoints.toFixed(1)
+                  : '-'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
