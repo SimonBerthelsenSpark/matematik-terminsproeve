@@ -7,7 +7,6 @@ import { CreateExamPage } from './pages/CreateExamPage.jsx';
 import { EditExamPage } from './pages/EditExamPage.jsx';
 import { StudentMatrixPage } from './pages/StudentMatrixPage.jsx';
 import { ExamDetailPage } from './pages/ExamDetailPage.jsx';
-import { CleanupPage } from './pages/CleanupPage.jsx';
 import { ExamContextProvider } from './hooks/useExamContext.jsx';
 import './index.css';
 
@@ -66,9 +65,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             </ExamContextProvider>
           }
         />
-        
-        {/* Admin - Cleanup old grading history */}
-        <Route path="/admin/cleanup" element={<CleanupPage />} />
         
         {/* Catch all - redirect to home */}
         <Route path="*" element={<Navigate to="/" replace />} />
