@@ -22,10 +22,10 @@ if (typeof window !== 'undefined') {
  */
 export async function convertPDFToImages(pdfFile, options = {}) {
   const {
-    scale = 1.0,        // Reduced from 1.5 for faster processing
-    maxPages = 5,       // Reduced from 10 to avoid timeout
+    scale = 0.8,        // Further reduced for speed
+    maxPages = 3,       // Only 3 pages to avoid timeout
     format = 'jpeg',
-    quality = 0.5       // Reduced from 0.8 for smaller files
+    quality = 0.4       // Lower quality for faster processing
   } = options;
 
   console.log('🔄 Converting PDF to images...');
