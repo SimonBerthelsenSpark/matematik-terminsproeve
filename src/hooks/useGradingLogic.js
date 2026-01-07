@@ -330,6 +330,15 @@ Returner JSON med:
         if (!customQuestion && detailedFeedback[key]?.text) return;
         
         setLoadingDetailedFeedback(key);
+        
+        console.log('🔍 DEBUG: askAIForDetails called');
+        console.log('  - customQuestion:', customQuestion);
+        console.log('  - hasImage:', !!imageBase64);
+        if (imageBase64) {
+            console.log('  - imageBase64 length:', imageBase64.length);
+            console.log('  - imageBase64 starts with:', imageBase64.substring(0, 50));
+        }
+        
         try {
             let systemPrompt, userPrompt;
             
@@ -349,20 +358,32 @@ Din opgave er at:
 ${imageBase64 ? 'Brug det vedhæftede screenshot til at forstå præcis hvad læreren refererer til.' : 'Hvis eleven har indsat billeder eller tegninger som du ikke kan se direkte, skal du nævne det i dit svar.'}`;
 
                 // Get the full student document
+                console.log('🔍 Looking for student file...');
+                console.log('  - result.submissionId:', result.submissionId);
+                console.log('  - result.fileName:', result.fileName);
+                console.log('  - result.elevNavn:', result.elevNavn);
+                console.log('  - Available files:', documents.elevbesvarelser.map(f => f.name));
+                
                 const elevFile = documents.elevbesvarelser.find(f =>
                     (result.submissionId && f.name.replace(/\.[^/.]+$/, '') === result.submissionId) ||
                     (result.fileName && f.name === result.fileName) ||
                     f.name === result.elevNavn
                 );
                 
+                console.log('  - Found elevFile:', elevFile?.name);
+                
                 let fullDocument = 'Kunne ikke finde det fulde dokument.';
                 if (elevFile) {
                     try {
                         fullDocument = await readFileContent(elevFile);
+                        console.log('📄 Full document length:', fullDocument.length);
+                        console.log('📄 Document preview:', fullDocument.substring(0, 500));
                     } catch (err) {
                         console.error('Could not read full document:', err);
                         fullDocument = `Fejl ved læsning af dokument: ${err.message}`;
                     }
+                } else {
+                    console.error('❌ Could not find student file!');
                 }
 
                 userPrompt = `HELE ELEVENS DOKUMENT:
