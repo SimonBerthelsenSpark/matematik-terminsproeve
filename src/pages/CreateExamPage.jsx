@@ -199,8 +199,8 @@ export function CreateExamPage() {
         }
       }
       
-      // Navigate to the new exam's detail page
-      navigate(`/exams/${examId}`);
+      // Navigate back to home page
+      navigate('/');
     } catch (err) {
       console.error('Error creating exam:', err);
       setSubmitError(err.message || 'Kunne ikke oprette prøve');

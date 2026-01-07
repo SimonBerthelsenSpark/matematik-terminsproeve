@@ -1,14 +1,14 @@
 {
-  "name": "Matematik Terminsprøve Retter",
-  "short_name": "Mat Retter",
-  "description": "Automatisk retning af matematik terminsprøver",
+  "name": "AI Prøveretter",
+  "short_name": "AI Retter",
+  "description": "Automatisk AI-baseret retning af prøver",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4F46E5",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%234F46E5' width='100' height='100'/><text y='75' font-size='80' fill='white' text-anchor='middle' x='50'>📝</text></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%234F46E5' width='100' height='100'/><text y='75' font-size='80' fill='white' text-anchor='middle' x='50'>🤖</text></svg>",
       "sizes": "512x512",
       "type": "image/svg+xml"
     }

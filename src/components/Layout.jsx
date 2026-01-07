@@ -25,7 +25,7 @@ export function Layout({ children }) {
             >
               <FileText />
               <h1 className="text-2xl font-bold text-gray-800">
-                Matematik Prøverettelse
+                AI Prøveretter
               </h1>
             </button>
             
