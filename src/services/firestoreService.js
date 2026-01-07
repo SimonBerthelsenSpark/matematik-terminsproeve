@@ -37,6 +37,9 @@ export async function createExam(examData) {
       updatedAt: serverTimestamp(),
       createdBy: examData.createdBy || 'anonymous',
       
+      // Vision API settings (Matematik only)
+      enableVision: examData.enableVision || false,
+      
       // File references (initially null)
       rettevejledningRef: null,
       omsætningstabelRef: null,
