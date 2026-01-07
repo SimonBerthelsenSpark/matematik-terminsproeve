@@ -673,11 +673,8 @@ export function MathExamGrader() {
                 grading.setError('Upload alle nødvendige dokumenter');
                 return;
             }
-            await grading.gradeAllExams();
-            
-            // For Matematik, calculate new results from state
-            const allResults = grading.results;
-            newResults = allResults.slice(resultsBeforeGrading);
+            // ✅ gradeAllExams now returns the newly graded results
+            newResults = await grading.gradeAllExams();
         }
         
         if (newResults.length > 0) {

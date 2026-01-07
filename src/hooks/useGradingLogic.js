@@ -223,7 +223,7 @@ Returner JSON med:
     const gradeAllExams = async () => {
         if (!documents.rettevejledning || !documents.omsætningstabel || documents.elevbesvarelser.length === 0) {
             setError('Upload venligst alle nødvendige dokumenter');
-            return;
+            return [];
         }
 
         setGrading(true);
@@ -299,8 +299,12 @@ Returner JSON med:
             
             setResults(allResults);
             setCurrentStep(3);
+            
+            // ✅ Return newly graded results
+            return newlyGradedResults;
         } catch (err) {
             setError(err.message);
+            return [];
         } finally {
             setGrading(false);
         }
