@@ -52,6 +52,10 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
 
     const callAI = async (rettevejledning, omsætningstabel, elevbesvarelse, elevNavn, submissionId, elevFile = null, maxRetries = 5) => {
         // Check if we should use Vision API
+        console.log('🔍 Vision check - examSettings:', examSettings);
+        console.log('🔍 Vision check - examSettings.enableVision:', examSettings?.enableVision);
+        console.log('🔍 Vision check - elevFile:', elevFile?.name, elevFile?.type);
+        
         const useVision = examSettings && shouldUseVision(examSettings, elevFile);
         
         console.log('🎯 Grading mode:', useVision ? 'VISION API (can see images)' : 'TEXT ONLY');
