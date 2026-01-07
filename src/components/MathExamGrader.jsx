@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, CheckCircle, AlertCircle, Loader2, Database, File, Users, X, Upload, Eye, EyeOff, Trash2, Calendar, Download, ExternalLink } from './Icons.jsx';
+import { FileText, CheckCircle, AlertCircle, Loader2, File, Users, X, Upload, Eye, EyeOff, Trash2, Calendar, Download, ExternalLink } from './Icons.jsx';
 import { GradingProgress } from './GradingProgress.jsx';
-import { AdminPanel } from './AdminPanel.jsx';
 import { ResultsOverview } from './ResultsOverview.jsx';
 import { StudentResult } from './StudentResult.jsx';
 import { DanskStudentResult } from './DanskStudentResult.jsx';
 import { useExamContext } from '../hooks/useExamContext.jsx';
 import { useFileUpload } from '../hooks/useFileUpload.js';
 import { useSubmissions } from '../hooks/useSubmissions.js';
-import { useFirestore } from '../hooks/useFirestore.js';
 import { useFileParsing } from '../hooks/useFileParsing.js';
 import { useGradingLogic } from '../hooks/useGradingLogic.js';
 import { useFileHandling } from '../hooks/useFileHandling.js';
@@ -53,7 +51,6 @@ const getTypeBadgeColor = (type) => {
 
 export function MathExamGrader() {
     const db = window.db;
-    const [showLogPanel, setShowLogPanel] = useState(false);
     const [showSubmissionsList, setShowSubmissionsList] = useState(false);
     
     // Exam context
@@ -80,9 +77,8 @@ export function MathExamGrader() {
     } = useSubmissions();
     
     // Custom hooks
-    const firestore = useFirestore(db, examId);
     const fileParsing = useFileParsing();
-    const grading = useGradingLogic(fileParsing.readFileContent, firestore.saveToHistory, examId);
+    const grading = useGradingLogic(fileParsing.readFileContent, null, examId);
     const fileHandling = useFileHandling(fileParsing.getAllFilesFromEntry, grading.setDocuments, grading.setError);
     
     // Upload state tracking
@@ -359,105 +355,7 @@ export function MathExamGrader() {
                         grading.setResults(transformedResults);
                         console.log(`✅ Loaded and set ${transformedResults.length} grading results from new format`);
                     } else {
-                        console.log('ℹ️ No results in new gradingResults subcollection, checking old gradingHistory collection...');
-                        
-                        // Fallback: Load from old gradingHistory collection
-                        // Load history and get the returned value directly (don't rely on state)
-                        console.log('📄 Loading gradingHistory from Firestore...');
-                        const loadedHistory = await firestore.loadHistoryFromFirestore();
-                        console.log('📄 Loaded history entries:', loadedHistory?.length || 0);
-                        console.log('📄 History data:', loadedHistory);
-                        
-                        if (loadedHistory && loadedHistory.length > 0) {
-                            console.log(`📄 Found ${loadedHistory.length} entries in gradingHistory collection`);
-                            
-                            // Find the most recent history entry for this exam
-                            const historyEntry = loadedHistory.find(entry => {
-                                console.log('🔍 Checking entry:', entry.id, 'examId:', entry.examId, 'target:', examId);
-                                console.log('🔍 Entry opgaver:', entry.opgaver);
-                                console.log('🔍 Opgaver type:', typeof entry.opgaver);
-                                console.log('🔍 Opgaver isArray:', Array.isArray(entry.opgaver));
-                                console.log('🔍 Opgaver keys:', entry.opgaver ? Object.keys(entry.opgaver) : 'null');
-                                
-                                return entry.examId === examId && entry.opgaver;
-                            });
-                            
-                            console.log('📄 Selected history entry:', historyEntry);
-                            
-                            if (historyEntry && historyEntry.opgaver) {
-                                // Convert opgaver to array if it's an object (handles sparse arrays from Firestore)
-                                let opgaverArray = historyEntry.opgaver;
-                                if (!Array.isArray(opgaverArray) && typeof opgaverArray === 'object') {
-                                    console.log('⚠️ Opgaver is object, converting to array');
-                                    opgaverArray = Object.values(opgaverArray);
-                                }
-                                console.log('📄 Opgaver array after conversion:', opgaverArray);
-                                console.log('📄 Opgaver array length:', opgaverArray.length);
-                                
-                                // Check if opgaver has the NEW detailed format with individual exercise data
-                                const hasDetailedData = opgaverArray.length > 0 &&
-                                    opgaverArray[0].opgaver &&
-                                    Array.isArray(opgaverArray[0].opgaver);
-                                
-                                console.log('🔍 Has detailed data:', hasDetailedData);
-                                if (opgaverArray.length > 0) {
-                                    console.log('🔍 First student in opgaverArray:', opgaverArray[0]);
-                                    console.log('🔍 First student opgaver field:', opgaverArray[0].opgaver);
-                                }
-                                
-                                if (hasDetailedData) {
-                                    console.log('✅ Found detailed opgaver data in history!');
-                                    // Transform from detailed old format to new format
-                                    const transformedResults = opgaverArray
-                                        .filter(student => !student.error)
-                                        .map(student => ({
-                                            // ✅ Beregn submissionId fra elevNavn/fileName
-                                            submissionId: student.submissionId || student.fileName?.replace(/\.[^/.]+$/, '') || student.elevNavn?.replace(/\.[^/.]+$/, '') || 'unknown',
-                                            elevNavn: student.elevNavn || 'Ukendt',
-                                            fileName: student.fileName || student.elevNavn,
-                                            opgaver: student.opgaver || [], // Detailed opgaver array
-                                            totalPoint: student.totalPoint || 0,
-                                            karakter: student.karakter || 0,
-                                            karakterBegrundelse: student.karakterBegrundelse || '',
-                                            samletFeedback: student.samletFeedback || '',
-                                            // Include teacher grading if available
-                                            lærerTotalPoint: student.lærerTotalPoint,
-                                            lærerKarakter: student.lærerKarakter,
-                                            // Metadata from history
-                                            historyId: historyEntry.id
-                                        }));
-                                    
-                                    console.log(`🔄 Transformed ${transformedResults.length} results WITH detailed opgaver from gradingHistory`);
-                                    console.log('🔍 First result opgaver:', transformedResults[0]?.opgaver);
-                                    grading.setResults(transformedResults);
-                                    console.log(`✅ Loaded detailed results from gradingHistory collection`);
-                                } else {
-                                    console.log('⚠️ Old format without detailed opgaver data');
-                                    // Transform old format without details to new format
-                                    const transformedResults = opgaverArray
-                                        .filter(opgave => !opgave.error)
-                                        .map(opgave => ({
-                                            elevNavn: opgave.elevNavn || 'Ukendt',
-                                            opgaver: [], // Old format doesn't have detailed opgaver
-                                            totalPoint: opgave.totalPoint || 0,
-                                            karakter: opgave.karakter || 0,
-                                            karakterBegrundelse: '',
-                                            samletFeedback: '',
-                                            // Metadata from history
-                                            fromHistory: true,
-                                            historyId: historyEntry.id
-                                        }));
-                                    
-                                    console.log(`🔄 Transformed ${transformedResults.length} results from old gradingHistory format (no details)`);
-                                    grading.setResults(transformedResults);
-                                    console.log(`✅ Loaded results from old gradingHistory collection`);
-                                }
-                            } else {
-                                console.log('ℹ️ No matching history entry found for this exam');
-                            }
-                        } else {
-                            console.log('ℹ️ No entries in gradingHistory collection either');
-                        }
+                        console.log('ℹ️ No results found in gradingResults subcollection');
                     }
                 } catch (err) {
                     console.error('❌ Error loading grading results:', err);
@@ -880,17 +778,6 @@ export function MathExamGrader() {
                         // Refresh exam context to show updated stats
                         await refreshExam();
                         
-                        // ✅ ONLY save NEW results to gradingHistory collection (not all results)
-                        console.log('💾 Also saving NEW results to gradingHistory for logging...');
-                        try {
-                            const totalCostToSave = exam?.type === 'Dansk' ? danskTotalCost : grading.totalCost;
-                            await firestore.saveToHistory(newResults, totalCostToSave);
-                            console.log(`✅ Saved ${newResults.length} NEW results to gradingHistory collection`);
-                        } catch (historyErr) {
-                            console.error('⚠️ Could not save to gradingHistory:', historyErr);
-                            // Don't fail the whole operation if history save fails
-                        }
-                        
                         setUploadStatus(`✅ ${savedCount} nye resultater gemt! (Total: ${grading.results.length})${errorCount > 0 ? ` (${errorCount} fejl)` : ''}`);
                     } catch (statsError) {
                         console.error('Error updating stats:', statsError);
@@ -1081,15 +968,6 @@ export function MathExamGrader() {
                                     </>
                                 )}
                             </button>
-                            
-                            {/* Log button */}
-                            <button
-                                onClick={() => setShowLogPanel(!showLogPanel)}
-                                className="px-4 py-2 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-md transition-all"
-                            >
-                                <Database className="w-4 h-4" />
-                                Log ({firestore.gradingHistory.length})
-                            </button>
                         </div>
                     </div>
                     
@@ -1177,18 +1055,6 @@ export function MathExamGrader() {
                         </div>
                     )}
                 </div>
-                {showLogPanel && (
-                    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                        <AdminPanel
-                            gradingHistory={firestore.gradingHistory}
-                            loadingHistory={firestore.loadingHistory}
-                            onDeleteEntry={firestore.deleteHistoryEntry}
-                            onClearAll={firestore.clearAllHistory}
-                            onEstimatePrices={firestore.estimateAllMissingPrices}
-                            examId={examId}
-                        />
-                    </div>
-                )}
 
                 {/* Results */}
                 {grading.results.length > 0 && (

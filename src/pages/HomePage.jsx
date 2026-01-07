@@ -4,7 +4,7 @@ import { useExams } from '../hooks/useExams.js';
 import { Layout } from '../components/Layout.jsx';
 import { Loader2, AlertCircle, CheckCircle, X } from '../components/Icons.jsx';
 import { Trash2 } from '../components/Icons.jsx';
-import { permanentlyDeleteExam } from '../services/firestoreService.js';
+import { permanentlyDeleteExam, getSubmissions } from '../services/firestoreService.js';
 import { ClassManagement } from '../components/ClassManagement.jsx';
 import { getAllClasses, getStudents } from '../services/classService.js';
 
@@ -44,19 +44,36 @@ export function HomePage() {
    * Handle exam deletion
    */
   const handleDeleteExam = async (examId, examBeskrivelse) => {
-    const confirmed = window.confirm(
-      `Er du sikker på at du vil slette "${examBeskrivelse}"?\n\n` +
-      `Dette vil permanent slette:\n` +
-      `- Prøven\n` +
-      `- Alle uploadede filer (Rettevejledning, Omsætningstabel, Elevbesvarelser)\n` +
-      `- Alle rettelser og resultater\n\n` +
-      `Denne handling kan ikke fortrydes!`
-    );
-
-    if (!confirmed) return;
-
     setDeleting(examId);
     try {
+      // Check if there are any submissions
+      const submissions = await getSubmissions(examId);
+      
+      if (submissions.length > 0) {
+        alert(
+          `Kan ikke slette prøven "${examBeskrivelse}"!\n\n` +
+          `Prøven har ${submissions.length} besvarelse${submissions.length !== 1 ? 'r' : ''}.\n\n` +
+          `Du skal først slette alle besvarelser via Student Matriks siden.`
+        );
+        setDeleting(null);
+        return;
+      }
+      
+      // No submissions, proceed with deletion
+      const confirmed = window.confirm(
+        `Er du sikker på at du vil slette "${examBeskrivelse}"?\n\n` +
+        `Dette vil permanent slette:\n` +
+        `- Prøven\n` +
+        `- Alle uploadede filer (Rettevejledning, Omsætningstabel, Bedømmelseskema)\n` +
+        `- Alle rettelser og resultater\n\n` +
+        `Denne handling kan ikke fortrydes!`
+      );
+
+      if (!confirmed) {
+        setDeleting(null);
+        return;
+      }
+
       await permanentlyDeleteExam(examId);
       await refreshExams(); // Reload exam list
       console.log('✅ Exam deleted successfully');

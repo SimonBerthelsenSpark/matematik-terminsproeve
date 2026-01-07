@@ -6,9 +6,6 @@ import { Loader2, AlertCircle, CheckCircle, X, Trash2 } from '../components/Icon
 import { getAllClasses, getStudents } from '../services/classService.js';
 import { uploadStudentSubmission } from '../services/storageService.js';
 import { addSubmission, getSubmissions, deleteSubmission, getGradingResults } from '../services/firestoreService.js';
-import { removeStudentFromOldGradingHistory } from '../utils/cleanupGradingHistory.js';
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
-import { db } from '../config/firebase.js';
 
 /**
  * StudentMatrixPage - Upload individual exam papers for each student
@@ -61,64 +58,9 @@ export function StudentMatrixPage() {
         const existingSubmissions = await getSubmissions(examId);
         setSubmissions(existingSubmissions);
 
-        // Get grading results from new subcollection
-        let results = await getGradingResults(examId);
-        console.log('📊 Grading results from new format:', results.length);
-        
-        // FALLBACK: If no results in new format, try old gradingHistory collection
-        if (results.length === 0) {
-          console.log('📊 No results in new format, checking old gradingHistory...');
-          try {
-            const historyQuery = query(
-              collection(db, 'gradingHistory'),
-              where('examId', '==', examId)
-            );
-            const historySnapshot = await getDocs(historyQuery);
-            console.log('📊 History snapshot size:', historySnapshot.size);
-            
-            if (!historySnapshot.empty) {
-              const historyEntry = historySnapshot.docs[0].data();
-              console.log('📊 Found gradingHistory entry:', historyEntry);
-              
-              if (historyEntry.opgaver && Array.isArray(historyEntry.opgaver)) {
-                // Transform old format to match new format for display
-                // We need to match with submission IDs based on elevNavn
-                results = historyEntry.opgaver
-                  .filter(item => !item.error)
-                  .map(item => {
-                    // Find matching submission by checking if submission fileName contains the elevNavn
-                    const elevNavnWithoutExt = item.elevNavn?.replace(/\.[^/.]+$/, '') || 'unknown';
-                    const matchingSubmission = existingSubmissions.find(sub =>
-                      sub.fileName && sub.fileName.includes(elevNavnWithoutExt)
-                    );
-                    
-                    return {
-                      submissionId: matchingSubmission?.id || elevNavnWithoutExt,
-                      elevNavn: item.elevNavn,
-                      aiGrading: {
-                        karakter: item.karakter,
-                        totalPoint: item.totalPoint
-                      },
-                      lærerGrading: item.lærerTotalPoint !== undefined ? {
-                        lærerKarakter: item.lærerKarakter,
-                        lærerTotalPoint: item.lærerTotalPoint
-                      } : null
-                    };
-                  });
-                console.log('📊 Transformed old results:', results.length);
-                console.log('📊 First transformed result:', results[0]);
-              }
-            }
-          } catch (historyErr) {
-            console.warn('Could not load from gradingHistory:', historyErr);
-          }
-        }
-        
-        console.log('📊 Final grading results count:', results.length);
-        if (results.length > 0) {
-          console.log('📊 First result:', results[0]);
-          console.log('📊 First result submissionId:', results[0].submissionId);
-        }
+        // Get grading results from gradingResults subcollection
+        const results = await getGradingResults(examId);
+        console.log('📊 Grading results loaded:', results.length);
         setGradingResults(results);
 
         console.log('📝 Submissions loaded:', existingSubmissions);
@@ -200,25 +142,24 @@ export function StudentMatrixPage() {
     const isGraded = gradingResults.some(result => result.submissionId === submissionId);
 
     const confirmMessage = isGraded
-      ? `Dette vil slette både besvarelsen OG rettelsen for ${student.studentName}.\n\nEr du sikker?`
-      : `Slet besvarelsen for ${student.studentName}?`;
+      ? `⚠️ ADVARSEL: Dette vil permanent slette for ${student.studentName}:\n\n` +
+        `- Besvarelsen (filen)\n` +
+        `- AI's rettelse og karakter\n` +
+        `- Lærerens rettelse og karakter\n` +
+        `- Alle point og delkarakterer\n` +
+        `- Al feedback og bedømmelse\n\n` +
+        `Denne handling kan ikke fortrydes!\n\n` +
+        `Er du sikker på at du vil fortsætte?`
+      : `Slet besvarelsen for ${student.studentName}?\n\n` +
+        `(Besvarelsen er endnu ikke rettet)`;
 
     if (!window.confirm(confirmMessage)) return;
 
     try {
       setDeletingSubmissionId(student.id);
 
-      // Delete submission and new grading results
+      // Delete submission and grading results
       await deleteSubmission(examId, submissionId, submission.storagePath);
-
-      // ALSO delete from old gradingHistory collection if it exists
-      try {
-        await removeStudentFromOldGradingHistory(examId, student.studentName);
-        console.log('✅ Cleaned up old grading history');
-      } catch (historyErr) {
-        console.warn('⚠️ Could not clean up old grading history:', historyErr);
-        // Don't fail the operation if old cleanup fails
-      }
 
       // Reload submissions and grading results
       const updatedSubmissions = await getSubmissions(examId);

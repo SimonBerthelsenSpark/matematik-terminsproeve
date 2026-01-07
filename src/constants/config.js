@@ -121,7 +121,6 @@ export const COLLECTIONS = {
   STUDENTS: 'students',
   SUBMISSIONS: 'studentSubmissions',
   GRADING_RESULTS: 'gradingResults',
-  GRADING_HISTORY: 'gradingHistory', // Old format, to be migrated
 };
 
 /**

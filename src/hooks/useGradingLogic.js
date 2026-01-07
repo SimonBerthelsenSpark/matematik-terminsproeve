@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
 
-export function useGradingLogic(readFileContent, saveToHistory, examId = null) {
+export function useGradingLogic(readFileContent, examId = null) {
     const [documents, setDocuments] = useState({
         rettevejledning: null,
         omsætningstabel: null,
@@ -299,11 +299,6 @@ Returner JSON med:
             
             setResults(allResults);
             setCurrentStep(3);
-            
-            // Only save newly graded results to history
-            if (newlyGradedResults.length > 0) {
-                saveToHistory(allResults, totalCost);
-            }
         } catch (err) {
             setError(err.message);
         } finally {
@@ -479,22 +474,6 @@ Returner JSON med:
                 }
             } else {
                 console.log('ℹ️ No examId or result.id - skipping database save');
-            }
-            
-            // Also save to history for backwards compatibility
-            if (saveToHistory) {
-                try {
-                    const updatedResults = [...results];
-                    updatedResults[resultIdx] = {
-                        ...updatedResults[resultIdx],
-                        opgaver: updatedOpgaver,
-                        lærerTotalPoint,
-                        lærerKarakter
-                    };
-                    await saveToHistory(updatedResults, 0);
-                } catch (historyError) {
-                    console.warn('⚠️ Could not save to history:', historyError);
-                }
             }
         } catch (err) {
             console.error('Fejl ved gemning:', err);

@@ -314,7 +314,7 @@ export function DanskStudentResult({
       )}
 
       {/* DYNAMISK rendering af ALLE dele */}
-      <details open className="cursor-pointer">
+      <details className="cursor-pointer">
         <summary className="font-semibold text-sm text-gray-700 hover:text-indigo-600 mb-3">
           📋 Detaljeret bedømmelse ({result.dele?.length || 0} dele)
         </summary>
