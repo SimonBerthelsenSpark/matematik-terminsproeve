@@ -310,7 +310,7 @@ Returner JSON med:
         }
     };
 
-    const askAIForDetails = async (resultIdx, opgaveIdx, customQuestion = null) => {
+    const askAIForDetails = async (resultIdx, opgaveIdx, customQuestion = null, imageBase64 = null) => {
         const key = `${resultIdx}-${opgaveIdx}`;
         const result = results[resultIdx];
         const opgave = result.opgaver[opgaveIdx];
@@ -326,15 +326,16 @@ Returner JSON med:
                 // Custom question mode - read entire document and answer specific question
                 systemPrompt = `Du er en erfaren matematikvejleder.
                 
-Læreren har stillet et specifikt spørgsmål om en elevs besvarelse af opgave ${opgave.nummer}.
+Læreren har stillet et specifikt spørgsmål om en elevs besvarelse af opgave ${opgave.nummer}.${imageBase64 ? ' Læreren har også vedhæftet et screenshot for at vise præcis hvad de refererer til.' : ''}
 
 Din opgave er at:
-1. Læse HELE elevens dokument grundigt (ikke kun det der blev ekstraheret som svar)
-2. Svare SPECIFIKT på lærerens spørgsmål
-3. Referere til konkret indhold fra eleven dokumentet i dit svar
-4. Være særligt opmærksom på om der er billeder, tegninger eller andet indhold der måske ikke blev fanget korrekt
+1. Læse HELE elevens dokument gr undigt (ikke kun det der blev ekstraheret som svar)
+2. ${imageBase64 ? 'Analysere det vedhæftede screenshot/billede læreren har sendt' : ''}
+3. Svare SPECIFIKT på lærerens spørgsmål
+4. Referere til konkret indhold fra elevens dokument${imageBase64 ? ' og det vedhæftede billede' : ''} i dit svar
+5. Være særligt opmærksom på om der er billeder, tegninger eller andet indhold der måske ikke blev fanget korrekt
 
-Hvis eleven har indsat billeder eller tegninger som du ikke kan se direkte, skal du nævne det i dit svar.`;
+${imageBase64 ? 'Brug det vedhæftede screenshot til at forstå præcis hvad læreren refererer til.' : 'Hvis eleven har indsat billeder eller tegninger som du ikke kan se direkte, skal du nævne det i dit svar.'}`;
 
                 // Get the full student document
                 const elevFile = documents.elevbesvarelser.find(f =>
@@ -365,17 +366,24 @@ SPECIFIK OPGAVE DER SPØRGES TIL (Opgave ${opgave.nummer}):
 LÆRERENS SPØRGSMÅL:
 ${customQuestion}
 
-Besvar lærerens spørgsmål grundigt baseret på hele dokumentet.`;
+${imageBase64 ? 'VEDHÆFTET SCREENSHOT: Se billedet nedenfor for præcis kontekst.' : ''}
+
+Besvar lærerens spørgsmål grundigt baseret på hele dokumentet${imageBase64 ? ' og det vedhæftede screenshot' : ''}.`;
             } else {
                 // Default question mode - simple explanation
                 systemPrompt = 'Du er matematikvejleder. Forklar SPECIFIKT hvad der mangler i elevens svar.';
                 userPrompt = `Opgave ${opgave.nummer}: Eleven fik ${opgave.givetPoint}/${opgave.maxPoint} point.\n\nELEVENS SVAR:\n${opgave.elevSvar || 'Ikke besvaret'}\n\nKORREKT SVAR:\n${opgave.korrektSvar}\n\nForklar hvad der mangler.`;
             }
             
+            // Prepare request body - with or without image
+            const requestBody = imageBase64
+                ? { systemPrompt, userPrompt, apiProvider: 'openai', imageBase64 }
+                : { systemPrompt, userPrompt, apiProvider: 'openai' };
+            
             const response = await fetch('/.netlify/functions/grade-exam', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ systemPrompt, userPrompt, apiProvider: 'openai' })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) throw new Error(`API fejl: ${response.status}`);
