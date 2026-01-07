@@ -11,7 +11,7 @@ export const handler = async (event, context) => {
   }
 
   try {
-    const { systemPrompt, userPrompt, apiProvider } = JSON.parse(event.body);
+    const { systemPrompt, userPrompt, apiProvider, imageBase64 } = JSON.parse(event.body);
     
     // 🔒 SIKKERHED: Kun OpenAI ChatGPT er tilladt
     if (apiProvider && apiProvider !== 'openai') {
@@ -49,11 +49,40 @@ export const handler = async (event, context) => {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     };
+    
+    // Build user message - with or without image
+    let userMessage;
+    if (imageBase64) {
+      // Vision API format - include image
+      userMessage = {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: userPrompt
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: imageBase64,  // Should be in format: data:image/jpeg;base64,...
+              detail: "high"  // Use high detail for better analysis
+            }
+          }
+        ]
+      };
+    } else {
+      // Standard text-only format
+      userMessage = {
+        role: "user",
+        content: userPrompt
+      };
+    }
+    
     const requestBody = {
-      model: 'gpt-4o',
+      model: 'gpt-4o',  // gpt-4o supports vision
       messages: [
         { role: "system", content: optimizedSystemPrompt },
-        { role: "user", content: userPrompt }
+        userMessage
       ],
       max_tokens: 16000,  // Increased for complex Dansk grading with many criteria
       temperature: 0.2,  // Reduced from 0.3 for more deterministic, faster responses
@@ -66,6 +95,9 @@ export const handler = async (event, context) => {
 
     console.log('🔐 Calling AI API securely from Netlify Function with streaming');
     console.log('⚡ Max tokens: 16000 (optimized for complex Dansk grading)');
+    if (imageBase64) {
+      console.log('📷 Image attached to request (vision API will be used)');
+    }
     
     // Create AbortController for timeout handling (26s provides safety margin under Netlify's 30s limit)
     const abortController = new AbortController();
