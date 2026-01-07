@@ -13,6 +13,13 @@ export const handler = async (event, context) => {
   try {
     const { systemPrompt, userPrompt, apiProvider, imageBase64 } = JSON.parse(event.body);
     
+    console.log('🔍 DEBUG: Netlify function called');
+    console.log('  - Has imageBase64:', !!imageBase64);
+    if (imageBase64) {
+      console.log('  - imageBase64 length:', imageBase64.length);
+      console.log('  - imageBase64 format:', imageBase64.substring(0, 30));
+    }
+    
     // 🔒 SIKKERHED: Kun OpenAI ChatGPT er tilladt
     if (apiProvider && apiProvider !== 'openai') {
       throw new Error('Kun OpenAI ChatGPT er understøttet. Andre providers er deaktiveret af sikkerhedsmæssige årsager.');
