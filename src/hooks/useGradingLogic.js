@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
+import { convertPDFToImages, shouldUseVision } from '../utils/pdfToImages.js';
 
-export function useGradingLogic(readFileContent, examId = null) {
+export function useGradingLogic(readFileContent, examId = null, examSettings = null) {
     const [documents, setDocuments] = useState({
         rettevejledning: null,
         omsætningstabel: null,
@@ -49,11 +50,41 @@ export function useGradingLogic(readFileContent, examId = null) {
         }
     };
 
-    const callAI = async (rettevejledning, omsætningstabel, elevbesvarelse, elevNavn, submissionId, maxRetries = 5) => {
+    const callAI = async (rettevejledning, omsætningstabel, elevbesvarelse, elevNavn, submissionId, elevFile = null, maxRetries = 5) => {
+        // Check if we should use Vision API
+        const useVision = examSettings && shouldUseVision(examSettings, elevFile);
+        
+        console.log('🎯 Grading mode:', useVision ? 'VISION API (can see images)' : 'TEXT ONLY');
+        
+        let pdfImages = null;
+        if (useVision && elevFile) {
+            try {
+                console.log('📸 Converting PDF to images for Vision API...');
+                pdfImages = await convertPDFToImages(elevFile, {
+                    scale: 1.5,
+                    maxPages: 10,
+                    format: 'jpeg',
+                    quality: 0.7
+                });
+                console.log(`✅ Converted ${pdfImages.length} pages to images`);
+            } catch (err) {
+                console.error('❌ PDF conversion failed, falling back to text-only:', err);
+                pdfImages = null; // Fall back to text-only
+            }
+        }
+        
         const systemPrompt = `Du er en erfaren matematikvejleder der retter FP10 matematik prøver.
 
+${pdfImages ? `🔍 VISION MODE AKTIV: Du kan se billeder af elevens besvarelse. Brug disse billeder til at:
+- Analysere tegninger, diagrammer og grafer
+- Se matematiske formler og udregninger som de er skrevet
+- Identificere visuelle elementer der ikke fanges af tekst-ekstraktion
+- Give mere præcis feedback baseret på hvad du faktisk SER i dokumentet
+
+VIGTIGT: Kombiner information fra både billeder OG ekstraheret tekst for den mest præcise retning.` : ''}
+
 Din opgave:
-1. Analysere elevens besvarelse
+1. Analysere elevens besvarelse${pdfImages ? ' (både billeder og tekst)' : ''}
 2. Tildele point NØJAGTIGT efter rettevejledning
 3. Give konstruktiv feedback (MAX 1-2 sætninger per opgave)
 4. Beregne totalPoint som SUM af alle givetPoint
@@ -64,7 +95,7 @@ KRITISK REGLER:
 - ALDRIG brug andre navne du finder i besvarelsen
 - For hver opgave skal du inkludere 'maxPoint' baseret på rettevejledningen
 - Hold feedback KORT og præcis (undgå lange forklaringer)
-- ALTID returner KOMPLET og VALID JSON
+- ALTID returner KOMPLET og VALID JSON${pdfImages ? '\n- Når du ser tegninger/billeder i dokumentet, GIV POINT hvis de er korrekte! Marker IKKE som "Ingen svar" hvis der er et billede.' : ''}
 
 Returner JSON med:
 - elevNavn (string - SKAL være "${elevNavn}")
@@ -74,7 +105,7 @@ Returner JSON med:
 - karakterBegrundelse (string - max 100 ord)
 - samletFeedback (string - max 200 ord)`;
 
-        const userPrompt = `RETTEVEJLEDNING:\n${rettevejledning}\n\nOMSÆTNINGSTABEL:\n${omsætningstabel}\n\nELEVNAVN (SKAL bruges i JSON): ${elevNavn}\n\nELEVBESVARELSE:\n${elevbesvarelse}\n\nRet nu elevbesvarelsen.`;
+        let userPrompt = `RETTEVEJLEDNING:\n${rettevejledning}\n\nOMSÆTNINGSTABEL:\n${omsætningstabel}\n\nELEVNAVN (SKAL bruges i JSON): ${elevNavn}\n\nELEVBESVARELSE (Ekstraheret tekst):\n${elevbesvarelse}\n\n${pdfImages ? `Du har modtaget ${pdfImages.length} billeder af elevens besvarelse som du kan se nedenfor. Brug dem til at identificere tegninger, diagrammer og andet visuelt indhold.\n\n` : ''}Ret nu elevbesvarelsen.`;
 
         const debugInfo = {
             endpoint: '/.netlify/functions/grade-exam',
@@ -99,10 +130,14 @@ Returner JSON med:
                 
                 let response;
                 try {
+                    const requestPayload = pdfImages
+                        ? { systemPrompt, userPrompt, apiProvider, pdfImages }
+                        : { systemPrompt, userPrompt, apiProvider };
+                    
                     response = await fetch('/.netlify/functions/grade-exam', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ systemPrompt, userPrompt, apiProvider }),
+                        body: JSON.stringify(requestPayload),
                         signal: controller.signal
                     });
                     
@@ -263,8 +298,8 @@ Returner JSON med:
                     setStatusMessage(`📖 Læser ${elevFile.name} (${i + 1}/${documents.elevbesvarelser.length})...`);
                     const elevbesvarelse = await readFileContent(elevFile);
                     
-                    // ✅ Send både filnavn OG submissionId
-                    const result = await callAI(rettevejledning, omsætningstabel, elevbesvarelse, elevFile.name, submissionId);
+                    // ✅ Send både filnavn, submissionId OG elevFile (for Vision)
+                    const result = await callAI(rettevejledning, omsætningstabel, elevbesvarelse, elevFile.name, submissionId, elevFile);
                     newlyGradedResults.push(result);
                     
                     // Update results incrementally with existing + new results

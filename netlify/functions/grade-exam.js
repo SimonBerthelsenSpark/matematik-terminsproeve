@@ -11,13 +11,20 @@ export const handler = async (event, context) => {
   }
 
   try {
-    const { systemPrompt, userPrompt, apiProvider, imageBase64 } = JSON.parse(event.body);
+    const { systemPrompt, userPrompt, apiProvider, imageBase64, pdfImages } = JSON.parse(event.body);
     
     console.log('🔍 DEBUG: Netlify function called');
-    console.log('  - Has imageBase64:', !!imageBase64);
+    console.log('  - Has imageBase64 (single):', !!imageBase64);
+    console.log('  - Has pdfImages (array):', !!pdfImages);
+    
     if (imageBase64) {
       console.log('  - imageBase64 length:', imageBase64.length);
       console.log('  - imageBase64 format:', imageBase64.substring(0, 30));
+    }
+    
+    if (pdfImages) {
+      console.log('  - pdfImages count:', pdfImages.length);
+      console.log('  - Total PDF images size:', (pdfImages.reduce((sum, img) => sum + img.length, 0) / 1024 / 1024).toFixed(2), 'MB');
     }
     
     // 🔒 SIKKERHED: Kun OpenAI ChatGPT er tilladt
@@ -57,10 +64,32 @@ export const handler = async (event, context) => {
       'Authorization': `Bearer ${apiKey}`
     };
     
-    // Build user message - with or without image
+    // Build user message - with or without images
     let userMessage;
-    if (imageBase64) {
-      // Vision API format - include image
+    if (pdfImages && pdfImages.length > 0) {
+      // Vision API format - multiple PDF page images
+      const imageContent = pdfImages.map((imageDataUrl, idx) => ({
+        type: "image_url",
+        image_url: {
+          url: imageDataUrl,
+          detail: "high"  // Use high detail for math diagrams/drawings
+        }
+      }));
+      
+      userMessage = {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: userPrompt
+          },
+          ...imageContent  // Add all PDF page images
+        ]
+      };
+      
+      console.log(`📸 Sending ${pdfImages.length} PDF page images to Vision API`);
+    } else if (imageBase64) {
+      // Vision API format - single custom question image
       userMessage = {
         role: "user",
         content: [
@@ -71,18 +100,20 @@ export const handler = async (event, context) => {
           {
             type: "image_url",
             image_url: {
-              url: imageBase64,  // Should be in format: data:image/jpeg;base64,...
-              detail: "high"  // Use high detail for better analysis
+              url: imageBase64,
+              detail: "high"
             }
           }
         ]
       };
+      console.log('📸 Sending 1 custom image to Vision API');
     } else {
       // Standard text-only format
       userMessage = {
         role: "user",
         content: userPrompt
       };
+      console.log('📝 Text-only mode (no images)');
     }
     
     const requestBody = {
