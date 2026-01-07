@@ -19,7 +19,8 @@ export function CreateExamPage() {
     beskrivelse: '',
     dato: '',
     klasse: '',
-    type: 'Matematik'
+    type: 'Matematik',
+    enableVision: false
   });
   
   const [useCustomClass, setUseCustomClass] = useState(false);
@@ -385,6 +386,49 @@ export function CreateExamPage() {
                 </p>
               )}
             </div>
+
+            {/* Vision API Toggle - Only for Matematik */}
+            {formData.type === 'Matematik' && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="enableVision"
+                    name="enableVision"
+                    checked={formData.enableVision}
+                    onChange={(e) => setFormData(prev => ({ ...prev, enableVision: e.target.checked }))}
+                    className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="enableVision" className="block text-sm font-semibold text-purple-900 cursor-pointer">
+                      🔍 Aktiver Vision API (BETA) - AI kan se billeder/tegninger i PDF'er
+                    </label>
+                    <p className="text-xs text-purple-700 mt-1">
+                      Med Vision API kan AI'en se og analysere tegninger, diagrammer og grafer i elevernes besvarelser.
+                      Dette giver mere præcis retning af opgaver med visuelle elementer.
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-white rounded p-2 border border-purple-200">
+                        <p className="font-semibold text-green-700">✅ Fordele:</p>
+                        <ul className="mt-1 space-y-0.5 text-purple-800">
+                          <li>• Ser tegninger i opgaver</li>
+                          <li>• Analyserer diagrammer</li>
+                          <li>• Mere præcis retning</li>
+                        </ul>
+                      </div>
+                      <div className="bg-white rounded p-2 border border-purple-200">
+                        <p className="font-semibold text-orange-700">⚠️ Overvej:</p>
+                        <ul className="mt-1 space-y-0.5 text-purple-800">
+                          <li>• 3-5x dyrere pr. retning</li>
+                          <li>• Langsommere retning</li>
+                          <li>• Kun for PDF filer</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* File Uploads Section - Conditional based on exam type */}
             <div className="border-t pt-6">

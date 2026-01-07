@@ -78,7 +78,7 @@ export function MathExamGrader() {
     
     // Custom hooks
     const fileParsing = useFileParsing();
-    const grading = useGradingLogic(fileParsing.readFileContent, null, examId);
+    const grading = useGradingLogic(fileParsing.readFileContent, examId, exam);
     const fileHandling = useFileHandling(fileParsing.getAllFilesFromEntry, grading.setDocuments, grading.setError);
     
     // Upload state tracking
