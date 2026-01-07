@@ -310,8 +310,19 @@ Returner JSON med:
         }
     };
 
-    const askAIForDetails = async (resultIdx, opgaveIdx, customQuestion = null, imageBase64 = null) => {
+    const askAIForDetails = async (resultIdx, opgaveIdx, customQuestion = null, imageBase64 = null, clearOnly = false) => {
         const key = `${resultIdx}-${opgaveIdx}`;
+        
+        // If clearOnly is true, just clear the feedback and return
+        if (clearOnly) {
+            setDetailedFeedback(prev => {
+                const newFeedback = { ...prev };
+                delete newFeedback[key];
+                return newFeedback;
+            });
+            return;
+        }
+        
         const result = results[resultIdx];
         const opgave = result.opgaver[opgaveIdx];
         
