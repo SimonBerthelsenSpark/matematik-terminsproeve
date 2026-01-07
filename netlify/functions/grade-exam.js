@@ -134,14 +134,23 @@ export const handler = async (event, context) => {
     console.log('🔐 Calling AI API securely from Netlify Function with streaming');
     console.log('⚡ Max tokens: 16000 (optimized for complex Dansk grading)');
     if (imageBase64) {
-      console.log('📷 Image attached to request (vision API will be used)');
+      console.log('📷 Single image attached to request (vision API will be used)');
+    }
+    if (pdfImages) {
+      console.log(`📷 ${pdfImages.length} PDF page images attached (vision API will be used)`);
     }
     
-    // Create AbortController for timeout handling (26s provides safety margin under Netlify's 30s limit)
+    // Create AbortController for timeout handling
+    // Vision API needs more time due to image processing
+    const isVisionRequest = !!(imageBase64 || pdfImages);
+    const timeoutDuration = isVisionRequest ? 50000 : 26000;  // 50s for Vision, 26s for text-only
+    
+    console.log(`⏱️ Server timeout set to ${timeoutDuration / 1000}s (${isVisionRequest ? 'Vision' : 'Text'} mode)`);
+    
     const abortController = new AbortController();
     const timeout = setTimeout(() => {
       abortController.abort();
-    }, 26000);  // Reduced from 28s to 26s for earlier timeout detection
+    }, timeoutDuration);
     
     try {
       const response = await fetch(endpoint, {

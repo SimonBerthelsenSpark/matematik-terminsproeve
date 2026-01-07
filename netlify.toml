@@ -11,5 +11,6 @@
   # Set maximum timeout for this function
   # Free tier: max 10 seconds
   # Pro tier: max 26 seconds
-  # OpenAI API can take time for long PDF processing
-  timeout = 26
+  # Business/Enterprise: max 60 seconds
+  # Vision API with PDF conversion needs extended timeout
+  timeout = 60
