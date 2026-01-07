@@ -122,11 +122,15 @@ Returner JSON med:
                 setCurrentTaskPhase('Sender anmodning til AI...');
                 setStatusMessage(`📤 Sender anmodning for ${elevNavn}...`);
                 
-                // Create AbortController for client-side timeout (29s to stay under function's 30s limit)
+                // Create AbortController for client-side timeout
+                // Vision API needs more time due to PDF conversion + image processing
+                const timeoutDuration = pdfImages ? 55000 : 29000;  // 55s for Vision, 29s for text-only
                 const controller = new AbortController();
                 const clientTimeout = setTimeout(() => {
                     controller.abort();
-                }, 29000);  // 29 seconds
+                }, timeoutDuration);
+                
+                console.log(`⏱️ Client timeout set to ${timeoutDuration / 1000}s (${pdfImages ? 'Vision' : 'Text'} mode)`);
                 
                 let response;
                 try {
