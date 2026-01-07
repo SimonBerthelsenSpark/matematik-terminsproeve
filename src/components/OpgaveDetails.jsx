@@ -1,11 +1,11 @@
 /**
  * OpgaveDetails Component
- * 
+ *
  * Detaljer for én opgave med point redigering
  * Viser elevens svar, korrekt svar, feedback, og AI detaljer
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Loader2, MessageCircle } from './Icons.jsx';
 
 export function OpgaveDetails({
@@ -21,8 +21,19 @@ export function OpgaveDetails({
     onAskAI,
     loadingDetailedFeedback = false
 }) {
+    const [customQuestion, setCustomQuestion] = useState('');
+    const [showQuestionInput, setShowQuestionInput] = useState(false);
+    
     const needsHelp = opgave.givetPoint < opgave.maxPoint;
     const hasFeedback = detailedFeedback;
+    
+    const handleAskCustomQuestion = () => {
+        if (customQuestion.trim()) {
+            onAskAI(customQuestion);
+            setCustomQuestion('');
+            setShowQuestionInput(false);
+        }
+    };
 
     return (
         <div className="border border-gray-300 rounded-lg p-2 bg-white">
@@ -83,14 +94,15 @@ export function OpgaveDetails({
                 <p className="text-xs text-gray-600">{opgave.feedback}</p>
             </div>
             
-            {/* Ask AI for more details button - only show if not full points */}
-            {needsHelp && (
-                <div className="mt-2">
-                    {!hasFeedback ? (
+            {/* Ask AI for more details */}
+            <div className="mt-2">
+                {!showQuestionInput && !hasFeedback ? (
+                    <div className="flex gap-2">
+                        {/* Quick default question */}
                         <button
-                            onClick={onAskAI}
+                            onClick={() => onAskAI()}
                             disabled={loadingDetailedFeedback}
-                            className="w-full px-2 py-1.5 bg-indigo-100 hover:bg-indigo-200 disabled:bg-gray-200 text-indigo-800 disabled:text-gray-500 text-xs font-medium rounded flex items-center justify-center gap-1.5 transition-colors"
+                            className="flex-1 px-2 py-1.5 bg-indigo-100 hover:bg-indigo-200 disabled:bg-gray-200 text-indigo-800 disabled:text-gray-500 text-xs font-medium rounded flex items-center justify-center gap-1.5 transition-colors"
                         >
                             {loadingDetailedFeedback ? (
                                 <>
@@ -100,25 +112,101 @@ export function OpgaveDetails({
                             ) : (
                                 <>
                                     <MessageCircle />
-                                    <span>🤖 Spørg AI: Hvad mangler jeg?</span>
+                                    <span>🤖 Hvad mangler jeg?</span>
                                 </>
                             )}
                         </button>
-                    ) : (
+                        
+                        {/* Custom question button */}
+                        <button
+                            onClick={() => setShowQuestionInput(true)}
+                            disabled={loadingDetailedFeedback}
+                            className="px-3 py-1.5 bg-purple-100 hover:bg-purple-200 disabled:bg-gray-200 text-purple-800 disabled:text-gray-500 text-xs font-medium rounded transition-colors"
+                            title="Stil dit eget spørgsmål"
+                        >
+                            ✏️
+                        </button>
+                    </div>
+                ) : showQuestionInput && !hasFeedback ? (
+                    <div className="space-y-2">
+                        <div className="flex items-start gap-2">
+                            <div className="flex-1">
+                                <label className="block text-xs font-semibold text-purple-900 mb-1">
+                                    💬 Stil dit spørgsmål til AI:
+                                </label>
+                                <textarea
+                                    value={customQuestion}
+                                    onChange={(e) => setCustomQuestion(e.target.value)}
+                                    placeholder="Fx: Hvorfor har eleven fået 0 i denne opgave når der er en tegning?"
+                                    className="w-full px-2 py-1.5 text-xs border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                                    rows="3"
+                                    disabled={loadingDetailedFeedback}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleAskCustomQuestion}
+                                disabled={loadingDetailedFeedback || !customQuestion.trim()}
+                                className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white disabled:text-gray-500 text-xs font-medium rounded flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                                {loadingDetailedFeedback ? (
+                                    <>
+                                        <Loader2 />
+                                        <span>Spørger AI...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <MessageCircle />
+                                        <span>Spørg AI</span>
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowQuestionInput(false);
+                                    setCustomQuestion('');
+                                }}
+                                disabled={loadingDetailedFeedback}
+                                className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-200 text-gray-700 disabled:text-gray-400 text-xs font-medium rounded transition-colors"
+                            >
+                                Annuller
+                            </button>
+                        </div>
+                    </div>
+                ) : hasFeedback ? (
+                    <div className="space-y-2">
                         <div className={`p-2 rounded-lg border-2 ${hasFeedback.error ? 'bg-red-50 border-red-300' : 'bg-indigo-50 border-indigo-300'}`}>
                             <div className="flex items-start gap-1.5 mb-1">
                                 <span className="text-lg">🤖</span>
                                 <div className="flex-1">
-                                    <p className="text-xs font-bold text-indigo-900 mb-1">AI Forklaring - Hvad mangler der:</p>
+                                    <p className="text-xs font-bold text-indigo-900 mb-1">
+                                        {hasFeedback.customQuestion ? 'AI Svar:' : 'AI Forklaring - Hvad mangler der:'}
+                                    </p>
+                                    {hasFeedback.customQuestion && (
+                                        <p className="text-xs text-purple-700 italic mb-2 pb-2 border-b border-indigo-200">
+                                            "{hasFeedback.customQuestion}"
+                                        </p>
+                                    )}
                                     <p className={`text-xs ${hasFeedback.error ? 'text-red-700' : 'text-indigo-800'} whitespace-pre-line`}>
                                         {hasFeedback.text}
                                     </p>
                                 </div>
                             </div>
                         </div>
-                    )}
-                </div>
-            )}
+                        {/* Allow asking another question */}
+                        <button
+                            onClick={() => {
+                                setShowQuestionInput(true);
+                                setCustomQuestion('');
+                            }}
+                            className="w-full px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-medium rounded transition-colors"
+                        >
+                            ✏️ Stil et nyt spørgsmål
+                        </button>
+                    </div>
+                ) : null}
+            </div>
         </div>
     );
 }

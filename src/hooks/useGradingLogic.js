@@ -310,16 +310,67 @@ Returner JSON med:
         }
     };
 
-    const askAIForDetails = async (resultIdx, opgaveIdx) => {
+    const askAIForDetails = async (resultIdx, opgaveIdx, customQuestion = null) => {
         const key = `${resultIdx}-${opgaveIdx}`;
         const result = results[resultIdx];
         const opgave = result.opgaver[opgaveIdx];
-        if (detailedFeedback[key]?.text) return;
+        
+        // Don't prevent asking if there's a custom question
+        if (!customQuestion && detailedFeedback[key]?.text) return;
         
         setLoadingDetailedFeedback(key);
         try {
-            const systemPrompt = 'Du er matematikvejleder. Forklar SPECIFIKT hvad der mangler i elevens svar.';
-            const userPrompt = `Opgave ${opgave.nummer}: Eleven fik ${opgave.givetPoint}/${opgave.maxPoint} point.\n\nELEVENS SVAR:\n${opgave.elevSvar || 'Ikke besvaret'}\n\nKORREKT SVAR:\n${opgave.korrektSvar}\n\nForklar hvad der mangler.`;
+            let systemPrompt, userPrompt;
+            
+            if (customQuestion) {
+                // Custom question mode - read entire document and answer specific question
+                systemPrompt = `Du er en erfaren matematikvejleder.
+                
+Læreren har stillet et specifikt spørgsmål om en elevs besvarelse af opgave ${opgave.nummer}.
+
+Din opgave er at:
+1. Læse HELE elevens dokument grundigt (ikke kun det der blev ekstraheret som svar)
+2. Svare SPECIFIKT på lærerens spørgsmål
+3. Referere til konkret indhold fra eleven dokumentet i dit svar
+4. Være særligt opmærksom på om der er billeder, tegninger eller andet indhold der måske ikke blev fanget korrekt
+
+Hvis eleven har indsat billeder eller tegninger som du ikke kan se direkte, skal du nævne det i dit svar.`;
+
+                // Get the full student document
+                const elevFile = documents.elevbesvarelser.find(f =>
+                    (result.submissionId && f.name.replace(/\.[^/.]+$/, '') === result.submissionId) ||
+                    (result.fileName && f.name === result.fileName) ||
+                    f.name === result.elevNavn
+                );
+                
+                let fullDocument = 'Kunne ikke finde det fulde dokument.';
+                if (elevFile) {
+                    try {
+                        fullDocument = await readFileContent(elevFile);
+                    } catch (err) {
+                        console.error('Could not read full document:', err);
+                        fullDocument = `Fejl ved læsning af dokument: ${err.message}`;
+                    }
+                }
+
+                userPrompt = `HELE ELEVENS DOKUMENT:
+${fullDocument}
+
+SPECIFIK OPGAVE DER SPØRGES TIL (Opgave ${opgave.nummer}):
+- Givet point: ${opgave.givetPoint}/${opgave.maxPoint}
+- Elevens svar (ekstraheret): ${opgave.elevSvar || 'Ikke ekstraheret korrekt'}
+- Korrekt svar: ${opgave.korrektSvar}
+- Feedback: ${opgave.feedback}
+
+LÆRERENS SPØRGSMÅL:
+${customQuestion}
+
+Besvar lærerens spørgsmål grundigt baseret på hele dokumentet.`;
+            } else {
+                // Default question mode - simple explanation
+                systemPrompt = 'Du er matematikvejleder. Forklar SPECIFIKT hvad der mangler i elevens svar.';
+                userPrompt = `Opgave ${opgave.nummer}: Eleven fik ${opgave.givetPoint}/${opgave.maxPoint} point.\n\nELEVENS SVAR:\n${opgave.elevSvar || 'Ikke besvaret'}\n\nKORREKT SVAR:\n${opgave.korrektSvar}\n\nForklar hvad der mangler.`;
+            }
             
             const response = await fetch('/.netlify/functions/grade-exam', {
                 method: 'POST',
@@ -332,14 +383,29 @@ Returner JSON med:
             if (!responseData.success) throw new Error(responseData.error);
             
             const content = responseData.data.choices[0].message.content;
-            setDetailedFeedback(prev => ({ ...prev, [key]: { loading: false, text: content.trim() } }));
+            setDetailedFeedback(prev => ({
+                ...prev,
+                [key]: {
+                    loading: false,
+                    text: content.trim(),
+                    customQuestion: customQuestion || null
+                }
+            }));
             
             if (responseData.data.usage) {
                 const cost = (responseData.data.usage.prompt_tokens / 1000000) * 2.50 + (responseData.data.usage.completion_tokens / 1000000) * 10.00;
                 setTotalCost(prev => prev + cost);
             }
         } catch (err) {
-            setDetailedFeedback(prev => ({ ...prev, [key]: { loading: false, text: `Fejl: ${err.message}`, error: true } }));
+            setDetailedFeedback(prev => ({
+                ...prev,
+                [key]: {
+                    loading: false,
+                    text: `Fejl: ${err.message}`,
+                    error: true,
+                    customQuestion: customQuestion || null
+                }
+            }));
         } finally {
             setLoadingDetailedFeedback(null);
         }
