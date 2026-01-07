@@ -871,7 +871,7 @@ export function MathExamGrader() {
                             // Don't fail the whole operation if history save fails
                         }
                         
-                        setUploadStatus(`✅ ${savedCount} nye resultater gemt! (Total: ${allResults.length})${errorCount > 0 ? ` (${errorCount} fejl)` : ''}`);
+                        setUploadStatus(`✅ ${savedCount} nye resultater gemt! (Total: ${grading.results.length})${errorCount > 0 ? ` (${errorCount} fejl)` : ''}`);
                     } catch (statsError) {
                         console.error('Error updating stats:', statsError);
                         setUploadStatus(`✅ ${savedCount} resultater gemt! (Kunne ikke opdatere statistik)`);
