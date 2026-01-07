@@ -19,6 +19,7 @@ export function OpgaveDetails({
     onStartEdit,
     detailedFeedback = null,
     onAskAI,
+    onClearFeedback,
     loadingDetailedFeedback = false
 }) {
     const [customQuestion, setCustomQuestion] = useState('');
@@ -28,6 +29,15 @@ export function OpgaveDetails({
     
     const needsHelp = opgave.givetPoint < opgave.maxPoint;
     const hasFeedback = detailedFeedback;
+    
+    const handleAskNewQuestion = () => {
+        if (onClearFeedback) {
+            onClearFeedback();
+        }
+        setShowQuestionInput(true);
+        setCustomQuestion('');
+        removeImage();
+    };
     
     const handleAskCustomQuestion = () => {
         if (customQuestion.trim()) {
@@ -284,10 +294,7 @@ export function OpgaveDetails({
                         </div>
                         {/* Allow asking another question */}
                         <button
-                            onClick={() => {
-                                setShowQuestionInput(true);
-                                setCustomQuestion('');
-                            }}
+                            onClick={handleAskNewQuestion}
                             className="w-full px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-medium rounded transition-colors"
                         >
                             ✏️ Stil et nyt spørgsmål

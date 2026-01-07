@@ -245,6 +245,7 @@ export function StudentResult({
                                 onStartEdit={onStartEdit}
                                 detailedFeedback={detailedFeedback[feedbackKey]}
                                 onAskAI={(customQuestion, imageBase64) => onAskAIDetails(index, opIdx, customQuestion, imageBase64)}
+                                onClearFeedback={() => onAskAIDetails(index, opIdx, null, null, true)}
                                 loadingDetailedFeedback={loadingDetailedFeedback === feedbackKey}
                             />
                         );
