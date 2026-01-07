@@ -244,7 +244,7 @@ export function StudentResult({
                                 onUpdateTempPoint={(value) => onUpdatePoint(index, opIdx, value)}
                                 onStartEdit={onStartEdit}
                                 detailedFeedback={detailedFeedback[feedbackKey]}
-                                onAskAI={() => onAskAIDetails(index, opIdx)}
+                                onAskAI={(customQuestion) => onAskAIDetails(index, opIdx, customQuestion)}
                                 loadingDetailedFeedback={loadingDetailedFeedback === feedbackKey}
                             />
                         );
