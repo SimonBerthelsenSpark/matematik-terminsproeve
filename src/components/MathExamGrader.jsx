@@ -737,8 +737,28 @@ export function MathExamGrader() {
         const gradedSubmissions = grading.results.length;
         
         if (gradedSubmissions >= totalSubmissions) {
-            grading.setError('⚠️ Alle besvarelser er allerede rettet. Slet rettelserne først hvis du vil rette igen.');
-            return;
+            const confirmed = window.confirm(
+                `Alle ${totalSubmissions} besvarelser er allerede rettet.\n\n` +
+                `Vil du slette de eksisterende rettelser og rette igen?\n\n` +
+                `Dette vil erstatte de nuværende rettelser med nye.`
+            );
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            // Delete existing gradings
+            try {
+                setUploadStatus('🗑️ Sletter eksisterende rettelser...');
+                await deleteAllGradingResults(examId);
+                grading.setResults([]);
+                await refreshExam();
+                setUploadStatus('');
+            } catch (err) {
+                console.error('Error deleting gradings:', err);
+                grading.setError(`Fejl ved sletning: ${err.message}`);
+                return;
+            }
         }
         
         // Store the count of results before grading
