@@ -105,7 +105,9 @@ export function calculateGradingResult(parsedBedoemmelse, aiGrading, elevNavn, s
         vaegt: krit.vaegt,
         delKarakter,
         vaegtetScore,
-        feedback: ai.feedback || ''
+        feedback: ai.feedback || '',
+        usikker: Boolean(ai.usikker),
+        usikkerhed: ai.usikkerhed || ''
       };
     });
     return { navn: del.navn, totalVaegt: del.totalVaegt, kriterier, delTotal };

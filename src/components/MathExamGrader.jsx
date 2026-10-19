@@ -792,7 +792,7 @@ export function MathExamGrader() {
                                                     <StatusPill tone="attention">Fejl</StatusPill>
                                                 ) : approved ? (
                                                     <StatusPill tone="ok">Godkendt</StatusPill>
-                                                ) : r.advarsler?.length ? (
+                                                ) : (r.advarsler?.length || r.dele?.some(d => d.kriterier?.some(k => k.usikker))) ? (
                                                     <StatusPill tone="attention">Tjek advarsel</StatusPill>
                                                 ) : (
                                                     <StatusPill>Til gennemsyn</StatusPill>

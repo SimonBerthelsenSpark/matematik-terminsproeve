@@ -46,7 +46,7 @@ export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, s
       const vaegtetScore = (delKarakter * krit.vaegt) / 100;
       delTotal += vaegtetScore;
       alle.push({ vaegt: krit.vaegt, delKarakter });
-      return { navn: krit.navn, vaegt: krit.vaegt, delKarakter, vaegtetScore, aiKarakter: aiKrit.delKarakter, feedback: aiKrit.feedback || '' };
+      return { navn: krit.navn, vaegt: krit.vaegt, delKarakter, vaegtetScore, aiKarakter: aiKrit.delKarakter, feedback: aiKrit.feedback || '', usikker: Boolean(aiKrit.usikker), usikkerhed: aiKrit.usikkerhed || '' };
     });
     return { navn: del.navn, totalVaegt: del.totalVaegt, kriterier, delTotal };
   });
@@ -57,7 +57,7 @@ export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, s
     try {
       setSaving(true);
       const lærerGrading = {
-        dele: dele.map(d => ({ ...d, kriterier: d.kriterier.map(({ aiKarakter, ...rest }) => rest) })),
+        dele: dele.map(d => ({ ...d, kriterier: d.kriterier.map(({ aiKarakter, usikker, usikkerhed, ...rest }) => rest) })),
         samletKarakter,
         afrundetKarakter,
         timestamp: new Date()
@@ -108,6 +108,9 @@ export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, s
                     <td>
                       <span className="block font-medium">{krit.navn}</span>
                       {krit.feedback && <span className="block text-[13px] text-ink-soft">{krit.feedback}</span>}
+                      {krit.usikker && (
+                        <span className="mt-1 block text-[13px] text-pen">AI er usikker{krit.usikkerhed ? `: ${krit.usikkerhed}` : ''}</span>
+                      )}
                     </td>
                     <td className="hidden sm:table-cell num text-right text-ink-soft whitespace-nowrap">{String(krit.vaegt).replace('.', ',')} %</td>
                     <td className="num text-right">{formatKarakter(krit.aiKarakter)}</td>
