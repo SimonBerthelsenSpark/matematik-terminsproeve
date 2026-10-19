@@ -15,12 +15,3 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-
-// Legacy global access (for backward compatibility)
-window.db = db;
-window.firebase = {
-  app,
-  db,
-  storage,
-  firestore: () => db
-};

@@ -17,7 +17,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase.js';
-import { deleteFile } from './storageService.js';
+import { deleteFile, deleteStorageFolder } from './storageService.js';
 
 // ==================== EXAM OPERATIONS ====================
 
@@ -268,6 +268,9 @@ export async function updateExamStats(examId, stats) {
     if (stats.averageGrade !== undefined) {
       updates['stats.averageGrade'] = stats.averageGrade;
     }
+    if (stats.reviewedCount !== undefined) {
+      updates['stats.reviewedCount'] = stats.reviewedCount;
+    }
     if (stats.lastGradedAt !== undefined) {
       updates['stats.lastGradedAt'] = serverTimestamp();
     }
@@ -312,6 +315,7 @@ export async function addSubmission(examId, submissionData) {
     // Document ID is filename without extension for uniqueness
     const docId = submissionData.fileName.replace(/\.[^/.]+$/, '');
     const docRef = doc(db, 'exams', examId, 'studentSubmissions', docId);
+    const existed = (await getDoc(docRef)).exists();
     
     await setDoc(docRef, {
       fileName: submissionData.fileName,
@@ -329,11 +333,13 @@ export async function addSubmission(examId, submissionData) {
       retryCount: 0
     });
     
-    // Increment exam submission count
-    await updateDoc(doc(db, 'exams', examId), {
-      'stats.totalSubmissions': increment(1),
-      updatedAt: serverTimestamp()
-    });
+    // Tæl kun op for nye besvarelser (ikke når en elevs fil erstattes)
+    if (!existed) {
+      await updateDoc(doc(db, 'exams', examId), {
+        'stats.totalSubmissions': increment(1),
+        updatedAt: serverTimestamp()
+      });
+    }
     
     return docId;
   } catch (error) {
@@ -502,12 +508,6 @@ export async function deleteSubmission(examId, submissionId, storagePath) {
  */
 export async function saveGradingResult(examId, submissionId, gradingData) {
   try {
-    console.log('💾 saveGradingResult called with:', { examId, submissionId });
-    console.log('💾 gradingData received:', gradingData);
-    console.log('💾 gradingData.dele:', gradingData.dele);
-    console.log('💾 gradingData.dele type:', typeof gradingData.dele);
-    console.log('💾 gradingData.dele isArray:', Array.isArray(gradingData.dele));
-    
     // Use submissionId as document ID to prevent duplicates
     const docRef = doc(db, 'exams', examId, 'gradingResults', submissionId);
     
@@ -521,7 +521,6 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
     
     // Detect exam type based on data structure
     const isDansk = gradingData.dele && Array.isArray(gradingData.dele);
-    console.log('💾 Detected isDansk:', isDansk);
     
     // Build aiGrading object based on exam type
     let aiGrading;
@@ -553,9 +552,10 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
       aiGrading = {
         opgaver: gradingData.opgaver || [],
         totalPoint: gradingData.totalPoint || 0,
-        karakter: gradingData.karakter || 0,
+        karakter: gradingData.karakter ?? 0,
         karakterBegrundelse: gradingData.karakterBegrundelse || '',
         samletFeedback: gradingData.samletFeedback || '',
+        advarsler: gradingData.advarsler || [],
         
         // AI metadata
         aiProvider: gradingData.aiProvider || 'openai',
@@ -567,7 +567,7 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
       
       finalGrade = {
         totalPoint: gradingData.totalPoint || 0,
-        karakter: gradingData.karakter || 0,
+        karakter: gradingData.karakter ?? 0,
         source: 'ai'
       };
     }
@@ -592,9 +592,6 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
-    
-    console.log('💾 Final dataToSave structure:', JSON.stringify(dataToSave, null, 2));
-    console.log('💾 aiGrading.dele in dataToSave:', dataToSave.aiGrading?.dele);
     
     await setDoc(docRef, dataToSave);
     
@@ -744,6 +741,7 @@ export async function recalculateExamStats(examId) {
     const results = await getGradingResults(examId);
     
     if (results.length === 0) {
+      await updateExamStats(examId, { gradedCount: 0, averagePoints: 0, averageGrade: 0, reviewedCount: 0 });
       return;
     }
     
@@ -753,6 +751,7 @@ export async function recalculateExamStats(examId) {
     let totalPoints = 0;
     let totalGrades = 0;
     let count = 0;
+    let reviewed = 0;
     
     results.forEach(result => {
       if (result.finalGrade) {
@@ -765,6 +764,7 @@ export async function recalculateExamStats(examId) {
           totalGrades += result.finalGrade.karakter || 0;
         }
         count++;
+        if (result.finalGrade.source === 'teacher') reviewed++;
       }
     });
     
@@ -775,6 +775,7 @@ export async function recalculateExamStats(examId) {
       gradedCount: count,
       averagePoints: isDansk ? 0 : Math.round(averagePoints * 10) / 10,  // 0 for Dansk, calculated for Matematik
       averageGrade: Math.round(averageGrade * 10) / 10,
+      reviewedCount: reviewed,
       lastGradedAt: true  // Will be converted to serverTimestamp
     });
     
@@ -815,19 +816,21 @@ export async function deleteAllGradingResults(examId) {
     const results = await getGradingResults(examId);
     console.log(`🗑️ Deleting ${results.length} grading results...`);
     
-    const batch = writeBatch(db);
-    results.forEach(result => {
-      const resultRef = doc(db, 'exams', examId, 'gradingResults', result.id);
-      batch.delete(resultRef);
-    });
-    
-    await batch.commit();
+    // Batches må højst have 500 operationer
+    for (let i = 0; i < results.length; i += 450) {
+      const batch = writeBatch(db);
+      results.slice(i, i + 450).forEach(result => {
+        batch.delete(doc(db, 'exams', examId, 'gradingResults', result.id));
+      });
+      await batch.commit();
+    }
     
     // Reset exam stats
     await updateExamStats(examId, {
       gradedCount: 0,
       averagePoints: 0,
-      averageGrade: 0
+      averageGrade: 0,
+      reviewedCount: 0
     });
     
     console.log(`✅ Deleted ${results.length} grading results`);
@@ -845,71 +848,44 @@ export async function deleteAllGradingResults(examId) {
  */
 export async function permanentlyDeleteExam(examId) {
   try {
-    console.log(`🗑️ Starting permanent deletion of exam: ${examId}`);
-    
-    // First, get the exam to retrieve file references
     const exam = await getExam(examId);
     if (!exam) {
       throw new Error('Exam not found');
     }
-    
-    // Delete files from Storage
-    const filesToDelete = [];
-    
-    if (exam.rettevejledningRef?.storagePath) {
-      filesToDelete.push(exam.rettevejledningRef.storagePath);
-    }
-    
-    if (exam.omsætningstabelRef?.storagePath) {
-      filesToDelete.push(exam.omsætningstabelRef.storagePath);
-    }
-    
-    // Get all submissions to delete their files
-    const submissions = await getSubmissions(examId);
-    submissions.forEach(submission => {
-      if (submission.storagePath) {
-        filesToDelete.push(submission.storagePath);
-      }
-    });
-    
-    // Delete all files from Storage
-    console.log(`📁 Deleting ${filesToDelete.length} files from Storage...`);
-    for (const filePath of filesToDelete) {
-      try {
-        await deleteFile(filePath);
-        console.log(`✅ Deleted: ${filePath}`);
-      } catch (err) {
-        console.warn(`⚠️ Could not delete file: ${filePath}`, err.message);
-        // Continue even if file deletion fails
+
+    // 1) Slet ALLE filer under exams/{examId}/ i Storage – også gamle filer,
+    //    der er blevet erstattet, og bedømmelseskemaer.
+    try {
+      await deleteStorageFolder(`exams/${examId}`);
+    } catch (err) {
+      // Fallback hvis Storage-reglerne ikke tillader "list": slet kendte filer enkeltvis
+      console.warn('Kunne ikke liste Storage-mappen, sletter kendte filer enkeltvis:', err.message);
+      const known = [
+        exam.rettevejledningRef?.storagePath,
+        exam.omsætningstabelRef?.storagePath,
+        exam.bedoemmelseskemaRef?.storagePath
+      ];
+      const subs = await getSubmissions(examId);
+      subs.forEach(sub => known.push(sub.storagePath));
+      for (const path of known.filter(Boolean)) {
+        await deleteFile(path).catch(e => console.warn(`Kunne ikke slette ${path}:`, e.message));
       }
     }
-    
-    // Delete Firestore data using batch
-    const batch = writeBatch(db);
-    
-    // Delete all grading results
+
+    // 2) Slet Firestore-data. Batches må højst have 500 operationer.
     const gradingResults = await getGradingResults(examId);
-    console.log(`📊 Deleting ${gradingResults.length} grading results...`);
-    gradingResults.forEach(result => {
-      const resultRef = doc(db, 'exams', examId, 'gradingResults', result.id);
-      batch.delete(resultRef);
-    });
-    
-    // Delete all submissions
-    console.log(`📝 Deleting ${submissions.length} submissions...`);
-    submissions.forEach(submission => {
-      const submissionRef = doc(db, 'exams', examId, 'studentSubmissions', submission.id);
-      batch.delete(submissionRef);
-    });
-    
-    // Delete the exam document itself
-    const examRef = doc(db, 'exams', examId);
-    batch.delete(examRef);
-    
-    // Commit all deletions
-    await batch.commit();
-    
-    console.log(`✅ Exam ${examId} permanently deleted`);
+    const submissions = await getSubmissions(examId);
+    const refs = [
+      ...gradingResults.map(r => doc(db, 'exams', examId, 'gradingResults', r.id)),
+      ...submissions.map(s => doc(db, 'exams', examId, 'studentSubmissions', s.id)),
+      doc(db, 'exams', examId)
+    ];
+
+    for (let i = 0; i < refs.length; i += 450) {
+      const batch = writeBatch(db);
+      refs.slice(i, i + 450).forEach(ref => batch.delete(ref));
+      await batch.commit();
+    }
   } catch (error) {
     console.error('Error permanently deleting exam:', error);
     throw new Error(`Failed to delete exam: ${error.message}`);

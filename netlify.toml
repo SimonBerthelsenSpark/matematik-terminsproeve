@@ -4,13 +4,18 @@
   functions = "netlify/functions"
 
 [functions]
-  # Global function settings
   node_bundler = "esbuild"
 
 [functions."grade-exam"]
-  # Set maximum timeout for this function
-  # Free tier: max 10 seconds
-  # Pro tier: max 26 seconds
-  # Business/Enterprise: max 60 seconds
-  # Vision API with PDF conversion needs extended timeout
+  # Ønsket tidsgrænse for AI-retning. Hvor lang tid en synkron funktion
+  # faktisk må køre, afhænger af jeres Netlify-plan – tjek det i Netlify,
+  # og sæt OPENAI_TIMEOUT_MS lidt under grænsen.
   timeout = 60
+
+# Sikkerheds-headers til hele sitet
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"

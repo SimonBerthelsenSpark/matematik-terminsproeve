@@ -1,409 +1,172 @@
 /**
- * DanskStudentResult Component
- * 
- * Viser dansk bedømmelse med DYNAMISK rendering af alle dele og kriterier
- * INGEN hardcoded kategorier - tilpasser sig automatisk til bedømmelseskemaet
+ * Dansk: én elevs bedømmelse pr. kriterium. Læreren kan ændre delkarakterer og godkende.
+ * Kriterier og vægte følger bedømmelseskemaet dynamisk.
  */
-
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
+import { getSubmissions, updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
 import { getFileDownloadURL } from '../services/storageService.js';
-import { getSubmissions } from '../services/firestoreService.js';
-import { calculateLaererGrading } from '../hooks/useDanskGrading.js';
-import { updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
+import { beregnVaegtetKarakter, SEVENTRIN, formatKarakter } from '../utils/karakter.js';
+import { GradeMark } from './ui.jsx';
+import { ExternalLink, Loader2 } from './Icons.jsx';
 
-export function DanskStudentResult({
-  result,
-  index,
-  parsedBedoemmelse,
-  examId,
-  onSave
-}) {
+const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
+
+export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, submissions = null, onSave }) {
   const [submissionPath, setSubmissionPath] = useState(null);
-  const [editMode, setEditMode] = useState(false);
-  const [tempKarakterer, setTempKarakterer] = useState({});
+  const [temp, setTemp] = useState({});
   const [saving, setSaving] = useState(false);
 
-  /**
-   * Load submission metadata to get correct storage path
-   */
   useEffect(() => {
-    const loadSubmissionPath = async () => {
+    const load = async () => {
       if (!examId || !result.submissionId) return;
-      
       try {
-        const submissions = await getSubmissions(examId);
-        const submission = submissions.find(sub => sub.id === result.submissionId);
-        
-        if (submission?.storagePath) {
-          setSubmissionPath(submission.storagePath);
-        }
+        const list = submissions ?? await getSubmissions(examId);
+        const submission = list.find(sub => sub.id === result.submissionId);
+        if (submission?.storagePath) setSubmissionPath(submission.storagePath);
       } catch (err) {
-        console.debug('Error loading submission path:', err.message);
+        console.debug('Kunne ikke finde besvarelsens fil:', err.message);
       }
     };
-    
-    loadSubmissionPath();
-  }, [examId, result.submissionId]);
+    load();
+  }, [examId, result.submissionId, submissions]);
 
-  /**
-   * Open student submission in new tab
-   */
-  const handleOpenSubmission = async (e) => {
-    e.preventDefault();
-    try {
-      if (!submissionPath) {
-        throw new Error('Submission fil kunne ikke findes');
-      }
-      
-      const url = await getFileDownloadURL(submissionPath);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error opening submission:', err);
-      alert('Kunne ikke åbne opgaven: ' + err.message);
-    }
-  };
+  const approved = Boolean(result.lærerGrading);
+  const base = result.lærerGrading || { dele: result.dele, samletKarakter: result.samletKarakter, afrundetKarakter: result.afrundetKarakter };
+  const skema = parsedBedoemmelse?.dele?.length ? parsedBedoemmelse : { dele: result.dele };
 
-  /**
-   * Handle error case
-   */
-  if (result.error) {
-    return (
-      <div className="bg-white rounded-lg shadow-lg p-6">
-        <h3 className="text-xl font-bold text-gray-800 mb-4">{result.elevNavn}</h3>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-700">Fejl: {result.error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  /**
-   * Calculate current displayed grading (lærer if exists, otherwise AI)
-   */
-  const displayGrading = result.lærerGrading || {
-    dele: result.dele,
-    samletKarakter: result.samletKarakter,
-    afrundetKarakter: result.afrundetKarakter
-  };
-
-  /**
-   * Start editing mode
-   */
-  const handleStartEdit = () => {
-    setEditMode(true);
-    
-    // Initialize temp karakterer med current values (lærer hvis findes, ellers AI)
-    const initial = {};
-    displayGrading.dele.forEach((del, delIdx) => {
-      del.kriterier.forEach((krit, kritIdx) => {
-        initial[`${delIdx}-${kritIdx}`] = krit.delKarakter;
-      });
+  // Live beregning ud fra lærerens valg
+  const alle = [];
+  const dele = (skema.dele || []).map((del, d) => {
+    let delTotal = 0;
+    const kriterier = del.kriterier.map((krit, k) => {
+      const baseKrit = base.dele?.[d]?.kriterier?.[k] || {};
+      const aiKrit = result.dele?.[d]?.kriterier?.[k] || {};
+      const delKarakter = temp[`${d}-${k}`] ?? baseKrit.delKarakter ?? aiKrit.delKarakter ?? 0;
+      const vaegtetScore = (delKarakter * krit.vaegt) / 100;
+      delTotal += vaegtetScore;
+      alle.push({ vaegt: krit.vaegt, delKarakter });
+      return { navn: krit.navn, vaegt: krit.vaegt, delKarakter, vaegtetScore, aiKarakter: aiKrit.delKarakter, feedback: aiKrit.feedback || '' };
     });
-    setTempKarakterer(initial);
-  };
+    return { navn: del.navn, totalVaegt: del.totalVaegt, kriterier, delTotal };
+  });
+  const { samletKarakter, afrundetKarakter } = beregnVaegtetKarakter(alle);
+  const changed = Object.keys(temp).length > 0;
 
-  /**
-   * Update temp karakter for et kriterium
-   */
-  const handleKarakterChange = (delIdx, kritIdx, newKarakter) => {
-    const key = `${delIdx}-${kritIdx}`; 
-    setTempKarakterer(prev => ({
-      ...prev,
-      [key]: parseInt(newKarakter)
-    }));
-  };
-
-  /**
-   * Calculate live preview based on temp karakterer
-   */
-  const calculateLivePreview = () => {
-    if (!editMode) return displayGrading;
-    
-    let samletKarakter = 0;
-    
-    const dele = parsedBedoemmelse.dele.map((del, delIdx) => {
-      let delTotal = 0;
-      
-      const kriterier = del.kriterier.map((krit, kritIdx) => {
-        const key = `${delIdx}-${kritIdx}`;
-        const delKarakter = tempKarakterer[key] ?? displayGrading.dele[delIdx].kriterier[kritIdx].delKarakter;
-        const vaegtetScore = (delKarakter * krit.vaegt) / 100;
-        delTotal += vaegtetScore;
-        
-        return {
-          navn: krit.navn,
-          vaegt: krit.vaegt,
-          delKarakter,
-          vaegtetScore
-        };
-      });
-      
-      samletKarakter += delTotal;
-      
-      return {
-        navn: del.navn,
-        totalVaegt: del.totalVaegt,
-        kriterier,
-        delTotal
-      };
-    });
-    
-    // Afrund til 7-trins
-    const trins = [-3, 0, 2, 4, 7, 10, 12];
-    let nearest = trins[0];
-    let minDiff = Math.abs(samletKarakter - nearest);
-    for (const trin of trins) {
-      const diff = Math.abs(samletKarakter - trin);
-      if (diff < minDiff) {
-        minDiff = diff;
-        nearest = trin;
-      }
-    }
-    
-    return {
-      dele,
-      samletKarakter,
-      afrundetKarakter: nearest
-    };
-  };
-
-  const livePreview = calculateLivePreview();
-
-  /**
-   * Save lærer grading
-   */
   const handleSave = async () => {
     try {
       setSaving(true);
-      
-      // Build lærer grading from temp values
       const lærerGrading = {
-        dele: livePreview.dele,
-        samletKarakter: livePreview.samletKarakter,
-        afrundetKarakter: livePreview.afrundetKarakter,
+        dele: dele.map(d => ({ ...d, kriterier: d.kriterier.map(({ aiKarakter, ...rest }) => rest) })),
+        samletKarakter,
+        afrundetKarakter,
         timestamp: new Date()
       };
-      
-      // Save to database if examId and result.id available
       if (examId && result.id) {
         await updateTeacherGrading(examId, result.id, lærerGrading);
         await recalculateExamStats(examId);
       }
-      
-      // Update parent
-      if (onSave) {
-        onSave(index, lærerGrading);
-      }
-      
-      setEditMode(false);
-      console.log('✅ Lærer bedømmelse gemt');
+      setTemp({});
+      toast.success(`Godkendt: ${formatKarakter(afrundetKarakter)}`);
+      onSave?.(index, lærerGrading);
     } catch (error) {
-      console.error('Error saving lærer grading:', error);
-      alert(`Fejl ved gemning: ${error.message}`);
+      toast.error(`Karakteren kunne ikke gemmes: ${error.message}`);
     } finally {
       setSaving(false);
     }
   };
 
-  /**
-   * Cancel editing
-   */
-  const handleCancel = () => {
-    setEditMode(false);
-    setTempKarakterer({});
+  const openSubmission = async () => {
+    try {
+      window.open(await getFileDownloadURL(submissionPath), '_blank', 'noopener');
+    } catch (err) {
+      toast.error('Besvarelsen kunne ikke åbnes: ' + err.message);
+    }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-3">
-        <h3 className="text-lg font-bold text-gray-800">{result.elevNavn}</h3>
-        {examId && submissionPath && (
-          <a
-            href="#"
-            onClick={handleOpenSubmission}
-            className="text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
-            title="Åbn opgave i ny fane"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-            <span>Se opgave</span>
-          </a>
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem] items-start">
+      <div className="surface overflow-hidden min-w-0">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Kriterium</th>
+              <th className="hidden sm:table-cell w-20 text-right">Vægt</th>
+              <th className="w-16 text-right">AI</th>
+              <th className="w-20 sm:w-28 text-right"><span className="sm:hidden">Din</span><span className="hidden sm:inline">Din karakter</span></th>
+            </tr>
+          </thead>
+          {dele.map((del, d) => (
+            <tbody key={d}>
+              <tr>
+                <td colSpan={4} className="bg-paper/60 !py-2 text-[13px] font-semibold text-ink-soft">{del.navn}</td>
+              </tr>
+              {del.kriterier.map((krit, k) => {
+                const afviger = krit.delKarakter !== krit.aiKarakter;
+                return (
+                  <tr key={k}>
+                    <td>
+                      <span className="block font-medium">{krit.navn}</span>
+                      {krit.feedback && <span className="block text-[13px] text-ink-soft">{krit.feedback}</span>}
+                    </td>
+                    <td className="hidden sm:table-cell num text-right text-ink-soft whitespace-nowrap">{String(krit.vaegt).replace('.', ',')} %</td>
+                    <td className="num text-right">{formatKarakter(krit.aiKarakter)}</td>
+                    <td className="text-right">
+                      <select
+                        value={krit.delKarakter}
+                        onChange={(e) => setTemp(prev => ({ ...prev, [`${d}-${k}`]: parseInt(e.target.value, 10) }))}
+                        className={`input num h-8 w-20 ml-auto px-2 ${afviger ? 'border-ink font-semibold' : ''}`}
+                        aria-label={`Din karakter for ${krit.navn}`}
+                      >
+                        {SEVENTRIN.map(t => <option key={t} value={t}>{formatKarakter(t)}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          ))}
+        </table>
+      </div>
+
+      <aside className="space-y-4 lg:sticky lg:top-6">
+        <div className="surface p-5">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[13px] text-ink-soft">Vægtet gennemsnit</p>
+              <p className="num text-[22px] font-semibold leading-tight">{fmt(samletKarakter)}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[13px] text-ink-soft mb-1">Karakter</p>
+              <GradeMark karakter={afrundetKarakter} approved={approved && !changed} size="lg" />
+            </div>
+          </div>
+          {(approved || changed) && (
+            <p className="mt-3 text-[13px] text-ink-soft">AI foreslog {fmt(result.samletKarakter ?? 0)}, altså {formatKarakter(result.afrundetKarakter)}.</p>
+          )}
+          <div className="mt-4 flex flex-col gap-2">
+            <button type="button" className="btn-primary w-full" onClick={handleSave} disabled={saving || (approved && !changed)}>
+              {saving && <Loader2 />}
+              {approved && !changed ? 'Godkendt' : approved ? 'Gem ændringer' : changed ? 'Godkend med dine karakterer' : 'Godkend karakter'}
+            </button>
+            {changed && <button type="button" className="btn-ghost w-full" onClick={() => setTemp({})}>Fortryd ændringer</button>}
+          </div>
+          {approved && !changed && <p className="mt-2 text-[13px] text-ok">Vælg en anden delkarakter for at ændre.</p>}
+        </div>
+
+        {result.karakterBegrundelse && (
+          <div className="text-sm px-1">
+            <p className="font-semibold">AI's vurdering</p>
+            <p className="text-ink-soft">{result.karakterBegrundelse}</p>
+          </div>
         )}
-      </div>
 
-      {/* Samlet oversigt */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-        {/* AI's Vurdering */}
-        <div className="bg-blue-50 rounded-lg p-3 border border-blue-300">
-          <p className="text-xs text-gray-600 mb-2 font-semibold">🤖 AI's Vurdering</p>
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-xs text-gray-500">Karakter</p>
-              <p className="text-2xl font-bold text-blue-600">{result.afrundetKarakter}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Beregnet</p>
-              <p className="text-lg font-semibold text-blue-600">{result.samletKarakter.toFixed(2)}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Lærerens Vurdering */}
-        <div className="bg-amber-50 rounded-lg p-3 border border-amber-400">
-          <p className="text-xs text-gray-600 mb-2 font-semibold">👨‍🏫 Lærerens Vurdering</p>
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-xs text-gray-500">Karakter</p>
-              <p className="text-2xl font-bold text-amber-700">
-                {livePreview.afrundetKarakter}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Beregnet</p>
-              <p className="text-lg font-semibold text-amber-700">
-                {livePreview.samletKarakter.toFixed(2)}
-              </p>
-            </div>
-          </div>
-          <p className="text-xs text-amber-800 mt-2">
-            {result.lærerGrading ? (editMode ? 'Redigerer...' : 'Lærer har rettet') : 'Urettet - viser AI'}
-          </p>
-        </div>
-      </div>
-
-      {/* Karakterbegrundelse */}
-      {result.karakterBegrundelse && (
-        <div className="mb-3 p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs font-semibold text-gray-700 mb-1">Samlet vurdering:</p>
-          <p className="text-gray-600 text-sm">{result.karakterBegrundelse}</p>
-        </div>
-      )}
-
-      {/* Edit controls */}
-      {!editMode ? (
-        <button
-          onClick={handleStartEdit}
-          className="mb-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          ✏️ Rediger lærer bedømmelse
-        </button>
-      ) : (
-        <div className="mb-3 p-3 bg-amber-50 border border-amber-400 rounded-lg">
-          <p className="text-amber-900 font-semibold text-xs mb-2">
-            ✏️ Ret karakterer nedenfor - ændringer opdateres live
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-xs font-semibold rounded transition-colors"
-            >
-              {saving ? '💾 Gemmer...' : '✅ Gem og beregn karakter'}
-            </button>
-            <button
-              onClick={handleCancel}
-              disabled={saving}
-              className="px-3 py-1.5 bg-gray-400 hover:bg-gray-500 disabled:bg-gray-300 text-white text-xs font-semibold rounded transition-colors"
-            >
-              ❌ Annuller
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* DYNAMISK rendering af ALLE dele */}
-      <details className="cursor-pointer">
-        <summary className="font-semibold text-sm text-gray-700 hover:text-indigo-600 mb-3">
-          📋 Detaljeret bedømmelse ({result.dele?.length || 0} dele)
-        </summary>
-
-        <div className="space-y-4 mt-2">
-          {/* Render hver del DYNAMISK */}
-          {result.dele?.map((aiDel, delIdx) => {
-            const currentDel = livePreview.dele[delIdx];
-            
-            return (
-              <div key={delIdx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                {/* Del header */}
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-bold text-gray-800">{aiDel.navn}</h4>
-                  <div className="text-sm">
-                    <span className="text-gray-600">Vægt: </span>
-                    <span className="font-semibold text-gray-800">{aiDel.totalVaegt}%</span>
-                    <span className="text-gray-600 ml-3">Total: </span>
-                    <span className="font-semibold text-indigo-600">{currentDel.delTotal.toFixed(2)}</span>
-                  </div>
-                </div>
-
-                {/* Render alle kriterier DYNAMISK */}
-                <div className="space-y-2">
-                  {aiDel.kriterier.map((aiKrit, kritIdx) => {
-                    const currentKrit = currentDel.kriterier[kritIdx];
-                    const key = `${delIdx}-${kritIdx}`;
-                    
-                    return (
-                      <div key={kritIdx} className="bg-white p-3 rounded border border-gray-200">
-                        {/* Kriterium header */}
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-800 text-sm">{aiKrit.navn}</p>
-                            <p className="text-xs text-gray-600">Vægt: {aiKrit.vaegt}%</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-600">Vægtet score</p>
-                            <p className="font-semibold text-indigo-600">{currentKrit.vaegtetScore.toFixed(2)}</p>
-                          </div>
-                        </div>
-
-                        {/* Karakterer */}
-                        <div className="grid grid-cols-2 gap-3 mt-2">
-                          {/* AI karakter */}
-                          <div className="bg-blue-50 p-2 rounded">
-                            <p className="text-xs text-gray-600 mb-1">🤖 AI karakter</p>
-                            <p className="text-lg font-bold text-blue-600">{aiKrit.delKarakter}</p>
-                          </div>
-
-                          {/* Lærer karakter */}
-                          <div className="bg-amber-50 p-2 rounded">
-                            <p className="text-xs text-gray-600 mb-1">👨‍🏫 Lærer karakter</p>
-                            {editMode ? (
-                              <select
-                                value={tempKarakterer[key] ?? currentKrit.delKarakter}
-                                onChange={(e) => handleKarakterChange(delIdx, kritIdx, e.target.value)}
-                                className="w-full px-2 py-1 border border-amber-300 rounded text-sm font-bold text-amber-700 bg-white"
-                              >
-                                <option value="-3">-3</option>
-                                <option value="0">00</option>
-                                <option value="2">02</option>
-                                <option value="4">4</option>
-                                <option value="7">7</option>
-                                <option value="10">10</option>
-                                <option value="12">12</option>
-                              </select>
-                            ) : (
-                              <p className="text-lg font-bold text-amber-700">{currentKrit.delKarakter}</p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Feedback */}
-                        {aiKrit.feedback && (
-                          <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-200">
-                            <p className="text-xs font-semibold text-gray-700">Feedback:</p>
-                            <p className="text-xs text-gray-600 mt-1">{aiKrit.feedback}</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </details>
+        {submissionPath && (
+          <button type="button" onClick={openSubmission} className="btn-secondary w-full">
+            Se besvarelsen <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </aside>
     </div>
   );
 }
