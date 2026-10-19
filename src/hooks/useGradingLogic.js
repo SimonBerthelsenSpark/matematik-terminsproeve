@@ -1,6 +1,48 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
 import { convertPDFToImages, shouldUseVision } from '../utils/pdfToImages.js';
+import { callAI, fjernElevnavn, navnFraFilnavn } from '../services/aiService.js';
+import { lookupKarakter, parseOmsaetningstabel, normalizeTabel, formatKarakter } from '../utils/karakter.js';
+
+/** Pause mellem elever (sekunder). 429-fejl håndteres desuden med automatisk backoff. */
+const PAUSE_MELLEM_ELEVER = 2;
+
+const submissionIdFraFil = (file) => file.name.replace(/\.[^/.]+$/, '');
+
+/**
+ * Efterbehandl AI-svaret for matematik:
+ * - point klemmes ind i [0, maxPoint]
+ * - totalPoint beregnes som summen
+ * - karakter slås op i omsætningstabellen (aldrig fra AI)
+ */
+export function efterbehandlMatematik(aiResult, omsaetningstabel) {
+    const advarsler = [];
+    const opgaver = (aiResult.opgaver || []).map(opgave => {
+        const maxPoint = Math.max(0, Number(opgave.maxPoint) || 0);
+        let givetPoint = Number(opgave.givetPoint) || 0;
+        if (givetPoint > maxPoint || givetPoint < 0) {
+            advarsler.push(`Opgave ${opgave.nummer}: AI gav ${givetPoint} af ${maxPoint} point – rettet til ${Math.min(Math.max(givetPoint, 0), maxPoint)}.`);
+            givetPoint = Math.min(Math.max(givetPoint, 0), maxPoint);
+        }
+        return { ...opgave, givetPoint, maxPoint };
+    });
+
+    const totalPoint = opgaver.reduce((sum, o) => sum + o.givetPoint, 0);
+    const samletMax = opgaver.reduce((sum, o) => sum + o.maxPoint, 0);
+    const tabelMax = Math.max(...normalizeTabel(omsaetningstabel).map(r => r.maxPoint ?? r.minPoint));
+    if (Number.isFinite(tabelMax) && samletMax > 0 && Math.abs(samletMax - tabelMax) > 0.01) {
+        advarsler.push(`Summen af maxPoint (${samletMax}) passer ikke med omsætningstabellens maksimum (${tabelMax}). Tjek om AI har overset eller opfundet opgaver.`);
+    }
+
+    return {
+        ...aiResult,
+        opgaver,
+        totalPoint,
+        karakter: lookupKarakter(omsaetningstabel, totalPoint),
+        advarsler
+    };
+}
 
 export function useGradingLogic(readFileContent, examId = null, examSettings = null) {
     const [documents, setDocuments] = useState({
@@ -24,25 +66,35 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
     const [testingConnection, setTestingConnection] = useState(false);
     const [connectionTestResult, setConnectionTestResult] = useState(null);
 
-    const apiProvider = 'openai';
+    // Cache af den fortolkede omsætningstabel (nulstilles når filen skiftes)
+    const tabelCache = useRef({ file: null, rows: null });
+
+    /**
+     * Hent omsætningstabellen som rækker.
+     * 1) Tabel som læreren har gemt på prøven (Rediger prøve) – foretrækkes
+     * 2) Ellers fortolkes den uploadede fil
+     */
+    const getOmsaetningstabel = async () => {
+        if (examSettings?.omsaetningstabelData?.length) {
+            return normalizeTabel(examSettings.omsaetningstabelData);
+        }
+        const file = documents.omsætningstabel;
+        if (!file) return null;
+        if (tabelCache.current.file === file) return tabelCache.current.rows;
+
+        const text = await readFileContent(file);
+        const rows = parseOmsaetningstabel(text);
+        tabelCache.current = { file, rows };
+        return rows;
+    };
 
     const testConnection = async () => {
         setTestingConnection(true);
         setConnectionTestResult(null);
         setError(null);
         try {
-            const response = await fetch('/.netlify/functions/grade-exam', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ systemPrompt: "Test", userPrompt: "Sig hej", apiProvider: 'openai' })
-            });
-            if (!response.ok) throw new Error(`API fejl: ${response.status}`);
-            const data = await response.json();
-            if (data.success) {
-                setConnectionTestResult({ success: true, message: 'Forbindelse succesfuld!', provider: 'OpenAI', model: 'gpt-4o' });
-            } else {
-                throw new Error(data.error || 'Ukendt fejl');
-            }
+            const { model } = await callAI('ping', {}, { maxRetries: 0, timeoutMs: 20000 });
+            setConnectionTestResult({ success: true, message: 'Forbindelse succesfuld!', provider: 'OpenAI', model });
         } catch (err) {
             setConnectionTestResult({ success: false, message: err.message });
         } finally {
@@ -50,280 +102,119 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         }
     };
 
-    const callAI = async (rettevejledning, omsætningstabel, elevbesvarelse, elevNavn, submissionId, elevFile = null, maxRetries = 5) => {
-        // Check if we should use Vision API
-        console.log('🔍 Vision check - examSettings:', examSettings);
-        console.log('🔍 Vision check - examSettings.enableVision:', examSettings?.enableVision);
-        console.log('🔍 Vision check - elevFile:', elevFile?.name, elevFile?.type);
-        
-        const useVision = examSettings && shouldUseVision(examSettings, elevFile);
-        
-        console.log('🎯 Grading mode:', useVision ? 'VISION API (can see images)' : 'TEXT ONLY');
-        
-        let pdfImages = null;
-        if (useVision && elevFile) {
+    const callAIForSubmission = async (rettevejledning, elevbesvarelse, elevNavn, submissionId, elevFile, omsaetningstabel) => {
+        const useVision = shouldUseVision(examSettings, elevFile);
+
+        let pdfImages = [];
+        if (useVision) {
             try {
-                console.log('📸 Converting PDF to images for Vision API...');
-                pdfImages = await convertPDFToImages(elevFile, {
-                    scale: 1.5,
-                    maxPages: 10,
-                    format: 'jpeg',
-                    quality: 0.7
-                });
-                console.log(`✅ Converted ${pdfImages.length} pages to images`);
+                setCurrentTaskPhase('Konverterer sider til billeder...');
+                const { images, truncated, totalPages } = await convertPDFToImages(elevFile);
+                pdfImages = images;
+                if (truncated) {
+                    console.warn(`Vision: kun ${images.length} af ${totalPages} sider sendes som billeder (størrelsesgrænse)`);
+                }
             } catch (err) {
-                console.error('❌ PDF conversion failed, falling back to text-only:', err);
-                pdfImages = null; // Fall back to text-only
+                console.error('PDF-konvertering fejlede, bruger kun tekst:', err);
+                pdfImages = [];
             }
         }
-        
-        const systemPrompt = `Du er en erfaren matematikvejleder der retter FP10 matematik prøver.
 
-${pdfImages ? `🔍 VISION MODE AKTIV: Du kan se billeder af elevens besvarelse. Brug disse billeder til at:
-- Analysere tegninger, diagrammer og grafer
-- Se matematiske formler og udregninger som de er skrevet
-- Identificere visuelle elementer der ikke fanges af tekst-ekstraktion
-- Give mere præcis feedback baseret på hvad du faktisk SER i dokumentet
+        // Elevens navn sendes ikke til AI
+        const anonymTekst = fjernElevnavn(elevbesvarelse, navnFraFilnavn(elevNavn));
 
-VIGTIGT: Kombiner information fra både billeder OG ekstraheret tekst for den mest præcise retning.` : ''}
-
-Din opgave:
-1. Analysere elevens besvarelse${pdfImages ? ' (både billeder og tekst)' : ''}
-2. Tildele point NØJAGTIGT efter rettevejledning
-3. Give konstruktiv feedback (MAX 1-2 sætninger per opgave)
-4. Beregne totalPoint som SUM af alle givetPoint
-5. Konvertere til karakter efter omsætningstabel
-
-KRITISK REGLER:
-- Brug PRÆCIS det elevnavn der står i prompten: "${elevNavn}"
-- ALDRIG brug andre navne du finder i besvarelsen
-- For hver opgave skal du inkludere 'maxPoint' baseret på rettevejledningen
-- Hold feedback KORT og præcis (undgå lange forklaringer)
-- ALTID returner KOMPLET og VALID JSON${pdfImages ? '\n- Når du ser tegninger/billeder i dokumentet, GIV POINT hvis de er korrekte! Marker IKKE som "Ingen svar" hvis der er et billede.' : ''}
-
-Returner JSON med:
-- elevNavn (string - SKAL være "${elevNavn}")
-- opgaver[] (array hvor hvert element har: nummer, elevSvar, korrektSvar, givetPoint, maxPoint, feedback)
-- totalPoint (number - sum af alle givetPoint)
-- karakter (number)
-- karakterBegrundelse (string - max 100 ord)
-- samletFeedback (string - max 200 ord)`;
-
-        let userPrompt = `RETTEVEJLEDNING:\n${rettevejledning}\n\nOMSÆTNINGSTABEL:\n${omsætningstabel}\n\nELEVNAVN (SKAL bruges i JSON): ${elevNavn}\n\nELEVBESVARELSE (Ekstraheret tekst):\n${elevbesvarelse}\n\n${pdfImages ? `Du har modtaget ${pdfImages.length} billeder af elevens besvarelse som du kan se nedenfor. Brug dem til at identificere tegninger, diagrammer og andet visuelt indhold.\n\n` : ''}Ret nu elevbesvarelsen.`;
-
-        const debugInfo = {
-            endpoint: '/.netlify/functions/grade-exam',
-            systemPromptSize: `${(systemPrompt.length / 1024).toFixed(2)} KB`,
-            userPromptSize: `${(userPrompt.length / 1024).toFixed(2)} KB`,
+        setRequestDebugInfo({
+            endpoint: '/.netlify/functions/grade-exam (gradeMath)',
             rettevejledningSize: `${(rettevejledning.length / 1024).toFixed(2)} KB`,
-            omsætningstabelSize: `${(omsætningstabel.length / 1024).toFixed(2)} KB`,
-            elevbesvarelseSize: `${(elevbesvarelse.length / 1024).toFixed(2)} KB`
-        };
-        setRequestDebugInfo(debugInfo);
+            elevbesvarelseSize: `${(anonymTekst.length / 1024).toFixed(2)} KB`,
+            images: pdfImages.length
+        });
 
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            try {
-                setCurrentTaskPhase('Sender anmodning til AI...');
-                setStatusMessage(`📤 Sender anmodning for ${elevNavn}...`);
-                
-                // Create AbortController for client-side timeout
-                // Vision API needs more time due to PDF conversion + image processing
-                const timeoutDuration = pdfImages ? 55000 : 29000;  // 55s for Vision, 29s for text-only
-                const controller = new AbortController();
-                const clientTimeout = setTimeout(() => {
-                    controller.abort();
-                }, timeoutDuration);
-                
-                console.log(`⏱️ Client timeout set to ${timeoutDuration / 1000}s (${pdfImages ? 'Vision' : 'Text'} mode)`);
-                
-                let response;
-                try {
-                    const requestPayload = pdfImages
-                        ? { systemPrompt, userPrompt, apiProvider, pdfImages }
-                        : { systemPrompt, userPrompt, apiProvider };
-                    
-                    response = await fetch('/.netlify/functions/grade-exam', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(requestPayload),
-                        signal: controller.signal
-                    });
-                    
-                    clearTimeout(clientTimeout);
+        setCurrentTaskPhase('Sender anmodning til AI...');
+        setStatusMessage(`📤 Retter ${elevNavn}...`);
 
-                    if (!response.ok) {
-                        const errorData = await response.text();
-                        if (response.status === 429) {
-                            const waitTime = Math.min(60 * Math.pow(2, attempt), 300);
-                            setRetryInfo({ attempt: attempt + 1, maxRetries, waitTime, elevNavn });
-                            for (let i = waitTime; i > 0; i--) {
-                                setStatusMessage(`⏳ Venter ${i} sekunder...`);
-                                await new Promise(resolve => setTimeout(resolve, 1000));
-                            }
-                            setRetryInfo(null);
-                            continue;
-                        }
-                        if (response.status === 502) {
-                            throw new Error(`Timeout: Dokumentet er for langt eller komplekst. Prøv at opdele i mindre dele.`);
-                        }
-                        throw new Error(`API fejl: ${response.status} - ${errorData}`);
-                    }
-                } catch (fetchError) {
-                    clearTimeout(clientTimeout);
-                    if (fetchError.name === 'AbortError') {
-                        throw new Error(`Timeout: Dokumentet tog for lang tid at rette. Prøv et kortere dokument.`);
-                    }
-                    throw fetchError;
-                }
-
-                const responseData = await response.json();
-                if (!responseData.success) throw new Error(responseData.error || 'Unknown error');
-                
-                const data = responseData.data;
-                const content = data.choices[0].message.content;
-                
-                if (data.usage) {
-                    const cost = (data.usage.prompt_tokens / 1000000) * 2.50 + (data.usage.completion_tokens / 1000000) * 10.00;
-                    setTotalCost(prev => prev + cost);
-                    console.log(`💰 Cost: $${cost.toFixed(4)}`);
-                }
-                
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    const jsonText = jsonMatch[0];
-                    
-                    // ✅ VALIDERING: Check om JSON er komplet
-                    if (!jsonText.trim().endsWith('}')) {
-                        throw new Error('Ufuldstændig JSON - AI svar blev sandsynligvis trunkeret. Dokumentet er for langt.');
-                    }
-                    
-                    // ✅ Check påkrævede felter
-                    const requiredFields = ['elevNavn', 'opgaver', 'totalPoint', 'karakter'];
-                    const missingFields = requiredFields.filter(field => !jsonText.includes(`"${field}"`));
-                    if (missingFields.length > 0) {
-                        throw new Error(`Manglende påkrævede felter i JSON: ${missingFields.join(', ')}`);
-                    }
-                    
-                    let result;
-                    try {
-                        result = JSON.parse(jsonText);
-                    } catch (parseError) {
-                        console.error('❌ JSON parse error:', parseError);
-                        console.error('❌ Trying to parse:', jsonText.substring(0, 500));
-                        
-                        // Try to fix common JSON errors
-                        let fixedJson = jsonText;
-                        
-                        // Fix trailing commas before closing brackets
-                        fixedJson = fixedJson.replace(/,(\s*[\]}])/g, '$1');
-                        
-                        // Try parsing again
-                        try {
-                            result = JSON.parse(fixedJson);
-                            console.log('✅ Fixed JSON and parsed successfully');
-                        } catch (retryError) {
-                            console.error('❌ Could not parse even after fix attempt');
-                            throw new Error(`JSON parse fejl: ${parseError.message}. AI svar var ugyldigt formateret.`);
-                        }
-                    }
-                    
-                    // ✅ FORCER korrekt elevNavn (fra parameter, ikke fra AI)
-                    if (result.elevNavn !== elevNavn) {
-                        console.warn(`⚠️ AI returnerede forkert navn: "${result.elevNavn}" → korrigerer til "${elevNavn}"`);
-                        result.elevNavn = elevNavn;
-                    }
-                    
-                    // ✅ TILFØJ submissionId og fileName
-                    result.submissionId = submissionId;
-                    result.fileName = elevNavn;
-                    
-                    // Validation
-                    if (result.opgaver && Array.isArray(result.opgaver)) {
-                        const calculatedTotal = result.opgaver.reduce((sum, opgave) => sum + (opgave.givetPoint || 0), 0);
-                        if (result.totalPoint !== calculatedTotal) {
-                            console.warn(`⚠️ Auto-correct: ${result.totalPoint} → ${calculatedTotal}`);
-                            result.totalPoint = calculatedTotal;
-                        }
-                    }
-                    return result;
-                }
-                throw new Error('Kunne ikke finde JSON i AI svar');
-            } catch (err) {
-                if (attempt === maxRetries - 1) throw err;
-                if (err.message.includes('429')) {
-                    const waitTime = Math.min(60 * Math.pow(2, attempt), 300);
-                    for (let i = waitTime; i > 0; i--) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                } else {
-                    throw err;
-                }
+        const { result: aiResult, cost, model } = await callAI(
+            'gradeMath',
+            { rettevejledning, elevbesvarelse: anonymTekst, pdfImages },
+            {
+                timeoutMs: pdfImages.length ? 65000 : 45000,
+                onRetry: (info) => setRetryInfo({ ...info, elevNavn }),
+                onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)
             }
-        }
-        throw new Error('Max forsøg nået');
+        );
+        setRetryInfo(null);
+        setTotalCost(prev => prev + cost);
+
+        const result = efterbehandlMatematik(aiResult, omsaetningstabel);
+        if (result.advarsler.length) console.warn(`Advarsler for ${elevNavn}:`, result.advarsler);
+
+        return {
+            ...result,
+            elevNavn,
+            fileName: elevNavn,
+            submissionId,
+            aiModel: model,
+            apiCost: cost
+        };
     };
 
-    const gradeAllExams = async () => {
-        if (!documents.rettevejledning || !documents.omsætningstabel || documents.elevbesvarelser.length === 0) {
+    /**
+     * @param {Object} [options]
+     * @param {boolean} [options.ignoreExisting] - ret alle forfra (bruges efter "slet og ret igen",
+     *   hvor `results` i denne closure stadig indeholder de netop slettede resultater)
+     */
+    const gradeAllExams = async ({ ignoreExisting = false } = {}) => {
+        if (!canProceed()) {
             setError('Upload venligst alle nødvendige dokumenter');
             return [];
         }
 
         setGrading(true);
         setError(null);
-        
-        // Don't clear existing results! Keep them and only add new ones
-        const existingResults = [...results];
-        const newGradingCost = 0;
+
+        // Fejlede retninger tages med igen, så de kan prøves på ny
+        const existingResults = ignoreExisting ? [] : results.filter(r => !r.error);
 
         try {
+            const omsaetningstabel = await getOmsaetningstabel();
+            if (!omsaetningstabel || omsaetningstabel.length === 0) {
+                throw new Error('Omsætningstabellen kunne ikke læses. Udfyld den under Materiale, før du retter.');
+            }
+
             const rettevejledning = await readFileContent(documents.rettevejledning);
-            const omsætningstabel = await readFileContent(documents.omsætningstabel);
-            
-            // ✅ Use submissionId for skip check (NOT elevNavn)
+
             const gradedSubmissionIds = new Set(
                 existingResults.map(r => r.submissionId || r.fileName?.replace(/\.[^/.]+$/, '') || r.elevNavn.replace(/\.[^/.]+$/, ''))
             );
             const newlyGradedResults = [];
-            
-            console.log(`📊 Already graded submission IDs:`, Array.from(gradedSubmissionIds));
-            console.log(`📊 Total submissions:`, documents.elevbesvarelser.length);
 
             for (let i = 0; i < documents.elevbesvarelser.length; i++) {
                 const elevFile = documents.elevbesvarelser[i];
-                
-                // ✅ KORREKT: Beregn submissionId fra filnavn
-                const submissionId = elevFile.name.replace(/\.[^/.]+$/, '');
-                
-                // ✅ KORREKT: Match på submissionId
+                const submissionId = submissionIdFraFil(elevFile);
+
                 if (gradedSubmissionIds.has(submissionId)) {
-                    console.log(`⏭️ Skipping ${submissionId} (${elevFile.name}) - already graded`);
                     setStatusMessage(`⏭️ Springer ${submissionId} over - allerede rettet (${i + 1}/${documents.elevbesvarelser.length})`);
                     continue;
                 }
-                
+
                 try {
                     setStatusMessage(`📖 Læser ${elevFile.name} (${i + 1}/${documents.elevbesvarelser.length})...`);
                     const elevbesvarelse = await readFileContent(elevFile);
-                    
-                    // ✅ Send både filnavn, submissionId OG elevFile (for Vision)
-                    const result = await callAI(rettevejledning, omsætningstabel, elevbesvarelse, elevFile.name, submissionId, elevFile);
+                    const result = await callAIForSubmission(rettevejledning, elevbesvarelse, elevFile.name, submissionId, elevFile, omsaetningstabel);
                     newlyGradedResults.push(result);
-                    
-                    // Update results incrementally with existing + new results
                     setResults([...existingResults, ...newlyGradedResults]);
-                    
+
                     if (i < documents.elevbesvarelser.length - 1) {
-                        for (let j = 5; j > 0; j--) {
+                        for (let j = PAUSE_MELLEM_ELEVER; j > 0; j--) {
                             setStatusMessage(`⏸️ Venter ${j} sekunder...`);
                             await new Promise(resolve => setTimeout(resolve, 1000));
                         }
                     }
                 } catch (err) {
                     console.error(`Fejl: ${elevFile.name}`, err);
-                    // ✅ Inkluder submissionId også ved fejl
+                    setRetryInfo(null);
                     newlyGradedResults.push({
-                        submissionId: submissionId,
+                        submissionId,
                         fileName: elevFile.name,
                         elevNavn: elevFile.name,
                         error: err.message
@@ -331,19 +222,17 @@ Returner JSON med:
                     setResults([...existingResults, ...newlyGradedResults]);
                 }
             }
-            
+
             const allResults = [...existingResults, ...newlyGradedResults];
-            
+
             if (newlyGradedResults.length === 0) {
                 setStatusMessage('ℹ️ Ingen nye prøver at rette - alle er allerede rettet!');
             } else {
                 setStatusMessage(`✅ ${newlyGradedResults.length} nye prøver rettet! (Total: ${allResults.length})`);
             }
-            
+
             setResults(allResults);
             setCurrentStep(3);
-            
-            // ✅ Return newly graded results
             return newlyGradedResults;
         } catch (err) {
             setError(err.message);
@@ -353,141 +242,71 @@ Returner JSON med:
         }
     };
 
+    const findElevFil = (result) => documents.elevbesvarelser.find(f =>
+        (result.submissionId && submissionIdFraFil(f) === result.submissionId) ||
+        (result.fileName && f.name === result.fileName) ||
+        f.name === result.elevNavn
+    );
+
     const askAIForDetails = async (resultIdx, opgaveIdx, customQuestion = null, imageBase64 = null, clearOnly = false) => {
         const key = `${resultIdx}-${opgaveIdx}`;
-        
-        // If clearOnly is true, just clear the feedback and return
+
         if (clearOnly) {
             setDetailedFeedback(prev => {
-                const newFeedback = { ...prev };
-                delete newFeedback[key];
-                return newFeedback;
+                const next = { ...prev };
+                delete next[key];
+                return next;
             });
             return;
         }
-        
+
         const result = results[resultIdx];
         const opgave = result.opgaver[opgaveIdx];
-        
-        // Don't prevent asking if there's a custom question
+
         if (!customQuestion && detailedFeedback[key]?.text) return;
-        
+
         setLoadingDetailedFeedback(key);
-        
-        console.log('🔍 DEBUG: askAIForDetails called');
-        console.log('  - customQuestion:', customQuestion);
-        console.log('  - hasImage:', !!imageBase64);
-        if (imageBase64) {
-            console.log('  - imageBase64 length:', imageBase64.length);
-            console.log('  - imageBase64 starts with:', imageBase64.substring(0, 50));
-        }
-        
+
         try {
-            let systemPrompt, userPrompt;
-            
+            const opgaveData = {
+                nummer: String(opgave.nummer ?? ''),
+                givetPoint: opgave.givetPoint,
+                maxPoint: opgave.maxPoint,
+                elevSvar: opgave.elevSvar || '',
+                korrektSvar: opgave.korrektSvar || '',
+                feedback: opgave.feedback || ''
+            };
+
+            let response;
             if (customQuestion) {
-                // Custom question mode - read entire document and answer specific question
-                systemPrompt = `Du er en erfaren matematikvejleder.
-                
-Læreren har stillet et specifikt spørgsmål om en elevs besvarelse af opgave ${opgave.nummer}.${imageBase64 ? ' Læreren har også vedhæftet et screenshot for at vise præcis hvad de refererer til.' : ''}
-
-Din opgave er at:
-1. Læse HELE elevens dokument gr undigt (ikke kun det der blev ekstraheret som svar)
-2. ${imageBase64 ? 'Analysere det vedhæftede screenshot/billede læreren har sendt' : ''}
-3. Svare SPECIFIKT på lærerens spørgsmål
-4. Referere til konkret indhold fra elevens dokument${imageBase64 ? ' og det vedhæftede billede' : ''} i dit svar
-5. Være særligt opmærksom på om der er billeder, tegninger eller andet indhold der måske ikke blev fanget korrekt
-
-${imageBase64 ? 'Brug det vedhæftede screenshot til at forstå præcis hvad læreren refererer til.' : 'Hvis eleven har indsat billeder eller tegninger som du ikke kan se direkte, skal du nævne det i dit svar.'}`;
-
-                // Get the full student document
-                console.log('🔍 Looking for student file...');
-                console.log('  - result.submissionId:', result.submissionId);
-                console.log('  - result.fileName:', result.fileName);
-                console.log('  - result.elevNavn:', result.elevNavn);
-                console.log('  - Available files:', documents.elevbesvarelser.map(f => f.name));
-                
-                const elevFile = documents.elevbesvarelser.find(f =>
-                    (result.submissionId && f.name.replace(/\.[^/.]+$/, '') === result.submissionId) ||
-                    (result.fileName && f.name === result.fileName) ||
-                    f.name === result.elevNavn
-                );
-                
-                console.log('  - Found elevFile:', elevFile?.name);
-                
-                let fullDocument = 'Kunne ikke finde det fulde dokument.';
+                let fullDocument = '';
+                const elevFile = findElevFil(result);
                 if (elevFile) {
                     try {
-                        fullDocument = await readFileContent(elevFile);
-                        console.log('📄 Full document length:', fullDocument.length);
-                        console.log('📄 Document preview:', fullDocument.substring(0, 500));
+                        fullDocument = fjernElevnavn(await readFileContent(elevFile), navnFraFilnavn(result.elevNavn));
                     } catch (err) {
-                        console.error('Could not read full document:', err);
-                        fullDocument = `Fejl ved læsning af dokument: ${err.message}`;
+                        console.error('Kunne ikke læse dokumentet:', err);
                     }
-                } else {
-                    console.error('❌ Could not find student file!');
                 }
-
-                userPrompt = `HELE ELEVENS DOKUMENT:
-${fullDocument}
-
-SPECIFIK OPGAVE DER SPØRGES TIL (Opgave ${opgave.nummer}):
-- Givet point: ${opgave.givetPoint}/${opgave.maxPoint}
-- Elevens svar (ekstraheret): ${opgave.elevSvar || 'Ikke ekstraheret korrekt'}
-- Korrekt svar: ${opgave.korrektSvar}
-- Feedback: ${opgave.feedback}
-
-LÆRERENS SPØRGSMÅL:
-${customQuestion}
-
-${imageBase64 ? 'VEDHÆFTET SCREENSHOT: Se billedet nedenfor for præcis kontekst.' : ''}
-
-Besvar lærerens spørgsmål grundigt baseret på hele dokumentet${imageBase64 ? ' og det vedhæftede screenshot' : ''}.`;
+                response = await callAI('askQuestion', {
+                    opgave: opgaveData,
+                    question: customQuestion,
+                    fullDocument,
+                    imageBase64: imageBase64 || undefined
+                }, { maxRetries: 2 });
             } else {
-                // Default question mode - simple explanation
-                systemPrompt = 'Du er matematikvejleder. Forklar SPECIFIKT hvad der mangler i elevens svar.';
-                userPrompt = `Opgave ${opgave.nummer}: Eleven fik ${opgave.givetPoint}/${opgave.maxPoint} point.\n\nELEVENS SVAR:\n${opgave.elevSvar || 'Ikke besvaret'}\n\nKORREKT SVAR:\n${opgave.korrektSvar}\n\nForklar hvad der mangler.`;
+                response = await callAI('explainTask', { opgave: opgaveData }, { maxRetries: 2 });
             }
-            
-            // Prepare request body - with or without image
-            const requestBody = imageBase64
-                ? { systemPrompt, userPrompt, apiProvider: 'openai', imageBase64 }
-                : { systemPrompt, userPrompt, apiProvider: 'openai' };
-            
-            const response = await fetch('/.netlify/functions/grade-exam', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
-            });
 
-            if (!response.ok) throw new Error(`API fejl: ${response.status}`);
-            const responseData = await response.json();
-            if (!responseData.success) throw new Error(responseData.error);
-            
-            const content = responseData.data.choices[0].message.content;
             setDetailedFeedback(prev => ({
                 ...prev,
-                [key]: {
-                    loading: false,
-                    text: content.trim(),
-                    customQuestion: customQuestion || null
-                }
+                [key]: { loading: false, text: String(response.result).trim(), customQuestion: customQuestion || null }
             }));
-            
-            if (responseData.data.usage) {
-                const cost = (responseData.data.usage.prompt_tokens / 1000000) * 2.50 + (responseData.data.usage.completion_tokens / 1000000) * 10.00;
-                setTotalCost(prev => prev + cost);
-            }
+            setTotalCost(prev => prev + response.cost);
         } catch (err) {
             setDetailedFeedback(prev => ({
                 ...prev,
-                [key]: {
-                    loading: false,
-                    text: `Fejl: ${err.message}`,
-                    error: true,
-                    customQuestion: customQuestion || null
-                }
+                [key]: { loading: false, text: `Fejl: ${err.message}`, error: true, customQuestion: customQuestion || null }
             }));
         } finally {
             setLoadingDetailedFeedback(null);
@@ -499,7 +318,6 @@ Besvar lærerens spørgsmål grundigt baseret på hele dokumentet${imageBase64 ?
         const result = results[resultIdx];
         const initialPoints = {};
         result.opgaver.forEach((opgave, opIdx) => {
-            // If teacher has already graded, use lærerPoint, otherwise default to AI's givetPoint
             initialPoints[`${resultIdx}-${opIdx}`] = opgave.lærerPoint !== undefined ? opgave.lærerPoint : opgave.givetPoint;
         });
         setTempLærerPoints(prev => ({ ...prev, ...initialPoints }));
@@ -513,143 +331,78 @@ Besvar lærerens spørgsmål grundigt baseret på hele dokumentet${imageBase64 ?
     };
 
     const saveLærerGrading = async (resultIdx) => {
+        const result = results[resultIdx];
+        let lærerTotalPoint = 0;
+
+        const updatedOpgaver = result.opgaver.map((opgave, opIdx) => {
+            const key = `${resultIdx}-${opIdx}`;
+            const lærerPoint = tempLærerPoints[key] !== undefined
+                ? tempLærerPoints[key]
+                : (opgave.lærerPoint !== undefined ? opgave.lærerPoint : opgave.givetPoint);
+            lærerTotalPoint += lærerPoint;
+            return { ...opgave, lærerPoint };
+        });
+
+        let omsaetningstabel;
         try {
-            const result = results[resultIdx];
-            let lærerTotalPoint = 0;
-            
-            // Update opgaver with teacher points
-            const updatedOpgaver = result.opgaver.map((opgave, opIdx) => {
-                const key = `${resultIdx}-${opIdx}`;
-                // Priority: 1) tempPoint (if just edited), 2) existing lærerPoint (if previously saved), 3) AI's givetPoint (default)
-                const lærerPoint = tempLærerPoints[key] !== undefined
-                    ? tempLærerPoints[key]
-                    : (opgave.lærerPoint !== undefined ? opgave.lærerPoint : opgave.givetPoint);
-                console.log(`Opgave ${opIdx}: tempPoint=${tempLærerPoints[key]}, lærerPoint=${lærerPoint}, existing=${opgave.lærerPoint}, givetPoint=${opgave.givetPoint}`);
-                lærerTotalPoint += lærerPoint;
-                return {
-                    ...opgave,
-                    lærerPoint
-                };
-            });
-            
-            console.log(`📊 Total lærer points calculated: ${lærerTotalPoint}`);
-
-            // Calculate teacher's grade
-            const omsætningstabelContent = await readFileContent(documents.omsætningstabel);
-            console.log('🔍 Omsætningstabel content:', omsætningstabelContent.substring(0, 500));
-            console.log('🔍 Looking for grade for', lærerTotalPoint, 'points');
-            
-            let lærerKarakter = -3;
-            
-            // Try to parse as space/tab separated on single line (from PDF extraction)
-            // Format: "Karakter Point - 3 0 0 0 1 12 2 13 20 4 21 36 7 37 51 10 52 64 12 65 75"
-            const cleanContent = omsætningstabelContent.replace(/\s+/g, ' ').trim();
-            
-            // Extract all numbers after "Karakter" and "Point" headers
-            const afterHeaders = cleanContent.split(/Karakter.*?Point/i).pop() || cleanContent;
-            const numbers = afterHeaders.match(/\-?\d+/g);
-            
-            if (numbers && numbers.length >= 3) {
-                console.log('📊 Found numbers:', numbers);
-                // Numbers come in groups of 3: [grade, minPoint, maxPoint]
-                for (let i = 0; i < numbers.length - 2; i += 3) {
-                    const grade = parseInt(numbers[i]);
-                    const min = parseInt(numbers[i + 1]);
-                    const max = parseInt(numbers[i + 2]);
-                    console.log(`   Range: ${min}-${max} points = grade ${grade}`);
-                    
-                    if (lærerTotalPoint >= min && lærerTotalPoint <= max) {
-                        lærerKarakter = grade;
-                        console.log(`✅ Match! ${lærerTotalPoint} points = grade ${lærerKarakter}`);
-                        break;
-                    }
-                }
-            } else {
-                // Fallback: Try line-by-line parsing for other formats
-                const lines = omsætningstabelContent.split('\n');
-                for (const line of lines) {
-                    // Pattern: "7    37    51" or "7\t37\t51"
-                    const match = line.match(/^(\-?\d+)\s+(\d+)\s+(\d+)/);
-                    if (match) {
-                        const grade = parseInt(match[1]);
-                        const min = parseInt(match[2]);
-                        const max = parseInt(match[3]);
-                        console.log(`   Found range: ${min}-${max} = grade ${grade}`);
-                        if (lærerTotalPoint >= min && lærerTotalPoint <= max) {
-                            lærerKarakter = grade;
-                            console.log(`✅ Match! ${lærerTotalPoint} points = grade ${lærerKarakter}`);
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            console.log(`📊 Final grade: ${lærerKarakter} for ${lærerTotalPoint} points`);
-            
-            if (lærerKarakter === -3) {
-                console.error('❌ FEJL: Kunne ikke finde karakter i omsætningstabellen!');
-                console.error('📄 Omsætningstabel indhold:', omsætningstabelContent);
-                alert(`FEJL: Kunne ikke finde karakter for ${lærerTotalPoint} point i omsætningstabellen.\n\nTjek at omsætningstabellen er korrekt formateret.\n\nSe browser console for detaljer (F12).`);
-            }
-
-            // Update local state first
-            setResults(prevResults => {
-                const newResults = [...prevResults];
-                newResults[resultIdx] = {
-                    ...newResults[resultIdx],
-                    opgaver: updatedOpgaver,
-                    lærerTotalPoint,
-                    lærerKarakter
-                };
-                return newResults;
-            });
-
-            setEditMode(prev => ({ ...prev, [resultIdx]: false }));
-            console.log(`✅ Lærer retning: ${lærerTotalPoint} point → karakter ${lærerKarakter}`);
-            
-            // Save to database if examId is available and result has an id
-            if (examId && result.id) {
-                try {
-                    console.log(`💾 Saving teacher grading to database for result ${result.id}...`);
-                    await updateTeacherGrading(examId, result.id, {
-                        opgaver: updatedOpgaver,
-                        totalPoint: lærerTotalPoint,
-                        karakter: lærerKarakter
-                    });
-                    
-                    // Recalculate exam statistics
-                    await recalculateExamStats(examId);
-                    console.log(`✅ Teacher grading saved to database`);
-                } catch (dbError) {
-                    console.error('⚠️ Could not save to database:', dbError);
-                    // Don't fail the operation if database save fails
-                    alert('Rettelsen er gemt lokalt, men kunne ikke gemmes i databasen.');
-                }
-            } else {
-                console.log('ℹ️ No examId or result.id - skipping database save');
-            }
+            omsaetningstabel = await getOmsaetningstabel();
         } catch (err) {
-            console.error('Fejl ved gemning:', err);
-            alert('Kunne ikke beregne karakter. Tjek omsætningstabellen.');
+            toast.error(`Kunne ikke læse omsætningstabellen: ${err.message}`);
+            return false;
         }
+
+        const lærerKarakter = lookupKarakter(omsaetningstabel, lærerTotalPoint);
+        if (lærerKarakter === null) {
+            toast.error('Omsætningstabellen kunne ikke læses. Udfyld den under Materiale, og prøv igen.', { duration: 8000 });
+            return false;
+        }
+
+        setResults(prevResults => {
+            const newResults = [...prevResults];
+            newResults[resultIdx] = {
+                ...newResults[resultIdx],
+                opgaver: updatedOpgaver,
+                lærerTotalPoint,
+                lærerKarakter
+            };
+            return newResults;
+        });
+        setEditMode(prev => ({ ...prev, [resultIdx]: false }));
+
+        if (examId && result.id) {
+            try {
+                await updateTeacherGrading(examId, result.id, {
+                    opgaver: updatedOpgaver,
+                    totalPoint: lærerTotalPoint,
+                    karakter: lærerKarakter
+                });
+                await recalculateExamStats(examId);
+                toast.success(`Godkendt: ${formatKarakter(lærerKarakter)} (${String(lærerTotalPoint).replace('.', ',')} point)`);
+            } catch (dbError) {
+                console.error('Kunne ikke gemme i databasen:', dbError);
+                toast.error('Karakteren er ikke gemt. Tjek forbindelsen, og godkend igen.');
+                return false;
+            }
+        }
+        return true;
     };
 
     const cancelEditing = (resultIdx) => {
         setEditMode(prev => ({ ...prev, [resultIdx]: false }));
         const result = results[resultIdx];
-        result.opgaver.forEach((_, opIdx) => {
-            setTempLærerPoints(prev => {
-                const newTemp = { ...prev };
-                delete newTemp[`${resultIdx}-${opIdx}`];
-                return newTemp;
-            });
+        setTempLærerPoints(prev => {
+            const next = { ...prev };
+            result.opgaver.forEach((_, opIdx) => delete next[`${resultIdx}-${opIdx}`]);
+            return next;
         });
     };
 
-    const canProceed = () => {
-        // Kræver mindst rettevejledning, omsætningstabel og minimum 1 elevbesvarelse
-        return documents.rettevejledning && documents.omsætningstabel && documents.elevbesvarelser.length >= 1;
-    };
+    const harOmsaetningstabel = () =>
+        Boolean(documents.omsætningstabel || examSettings?.omsaetningstabelData?.length);
+
+    function canProceed() {
+        return Boolean(documents.rettevejledning && harOmsaetningstabel() && documents.elevbesvarelser.length >= 1);
+    }
 
     return {
         documents,

@@ -1,71 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, CheckCircle, AlertCircle, Loader2, File, Users, X, Upload, Eye, EyeOff, Trash2, Calendar, Download, ExternalLink } from './Icons.jsx';
+import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { Loader2, Trash2, ChevronDown } from './Icons.jsx';
+import { ExamShell } from './ExamShell.jsx';
+import { Notice, EmptyState, GradeMark, GradeLegend, StatusPill, useConfirm, elevnavnFraFil, elevnummerFraFil } from './ui.jsx';
 import { GradingProgress } from './GradingProgress.jsx';
-import { ResultsOverview } from './ResultsOverview.jsx';
 import { StudentResult } from './StudentResult.jsx';
 import { DanskStudentResult } from './DanskStudentResult.jsx';
 import { useExamContext } from '../hooks/useExamContext.jsx';
-import { useFileUpload } from '../hooks/useFileUpload.js';
 import { useSubmissions } from '../hooks/useSubmissions.js';
 import { useFileParsing } from '../hooks/useFileParsing.js';
 import { useGradingLogic } from '../hooks/useGradingLogic.js';
-import { useFileHandling } from '../hooks/useFileHandling.js';
 import { saveGradingResult, recalculateExamStats, getGradingResults, deleteAllGradingResults } from '../services/firestoreService.js';
 import { getFileDownloadURL } from '../services/storageService.js';
 import { parseDanskBedoemmelse, getCachedParsedBedoemmelse, saveParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
 import { bedoemDanskOpgave } from '../hooks/useDanskGrading.js';
 
-/**
- * Format date to DD/MM/YYYY
- */
-const formatDate = (date) => {
-    if (!date) return '-';
-    
-    let dateObj;
-    if (date.toDate) {
-        // Firestore Timestamp
-        dateObj = date.toDate();
-    } else if (date instanceof Date) {
-        dateObj = date;
-    } else {
-        dateObj = new Date(date);
-    }
-
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const year = dateObj.getFullYear();
-    return `${day}/${month}/${year}`;
-};
-
-/**
- * Get badge color based on exam type
- */
-const getTypeBadgeColor = (type) => {
-    if (type === 'Matematik') {
-        return 'bg-blue-100 text-blue-800 border-blue-200';
-    } else if (type === 'Dansk') {
-        return 'bg-green-100 text-green-800 border-green-200';
-    }
-    return 'bg-gray-100 text-gray-800 border-gray-200';
-};
-
 export function MathExamGrader() {
-    const db = window.db;
-    const [showSubmissionsList, setShowSubmissionsList] = useState(false);
+    const confirm = useConfirm();
+    const [openId, setOpenId] = useState(null);
     
     // Exam context
     const { examId, exam, updateExamInContext, refreshExam } = useExamContext();
     
-    // File upload hooks
-    const {
-        uploadRettevejledning,
-        uploadOmsaetningstabel,
-        uploadBedoemmelseskema,
-        uploadSubmission,
-        uploading,
-        uploadProgress,
-        error: uploadError
-    } = useFileUpload();
+    const uploadError = null;
     
     // Submissions hooks
     const {
@@ -79,7 +37,9 @@ export function MathExamGrader() {
     // Custom hooks
     const fileParsing = useFileParsing();
     const grading = useGradingLogic(fileParsing.readFileContent, examId, exam);
-    const fileHandling = useFileHandling(fileParsing.getAllFilesFromEntry, grading.setDocuments, grading.setError);
+    
+    // Resultater uden fejl – bruges til tællere og statistik, så fejlede retninger kan prøves igen
+    const okResults = grading.results.filter(r => !r.error);
     
     // Upload state tracking
     const [uploadedFiles, setUploadedFiles] = useState({
@@ -89,7 +49,6 @@ export function MathExamGrader() {
         submissions: []
     });
     const [uploadStatus, setUploadStatus] = useState('');
-    const [duplicateFiles, setDuplicateFiles] = useState([]);
     
     // Dansk-specific state
     const [parsedBedoemmelse, setParsedBedoemmelse] = useState(null);
@@ -324,13 +283,14 @@ export function MathExamGrader() {
                                 // MATEMATIK result (original)
                                 console.log('🔍 Matematik result detected - has opgaver');
                                 
-                                let opgaverArray = [];
-                                if (Array.isArray(aiGrading.opgaver)) {
-                                    opgaverArray = aiGrading.opgaver;
-                                } else if (aiGrading.opgaver && typeof aiGrading.opgaver === 'object') {
-                                    opgaverArray = Object.values(aiGrading.opgaver);
-                                    console.log('⚠️ Converted opgaver object to array:', opgaverArray);
-                                }
+                                const toArray = (opgaver) => Array.isArray(opgaver)
+                                    ? opgaver
+                                    : (opgaver && typeof opgaver === 'object' ? Object.values(opgaver) : []);
+                                
+                                // Lærerens opgaver indeholder lærerPoint pr. opgave – brug dem hvis de findes,
+                                // ellers mistes lærerens point pr. opgave ved genindlæsning
+                                const lærerOpgaver = toArray(result.lærerGrading?.opgaver);
+                                const opgaverArray = lærerOpgaver.length > 0 ? lærerOpgaver : toArray(aiGrading.opgaver);
                                 
                                 return {
                                     submissionId: result.submissionId || result.id,
@@ -341,6 +301,7 @@ export function MathExamGrader() {
                                     karakter: aiGrading.karakter || 0,
                                     karakterBegrundelse: aiGrading.karakterBegrundelse || '',
                                     samletFeedback: aiGrading.samletFeedback || '',
+                                    advarsler: aiGrading.advarsler || [],
                                     lærerTotalPoint: result.lærerGrading?.lærerTotalPoint,
                                     lærerKarakter: result.lærerGrading?.lærerKarakter,
                                     id: result.id
@@ -370,120 +331,8 @@ export function MathExamGrader() {
         loadExistingFiles();
     }, [exam?.id, examId]); // Only re-run when exam ID changes
     
-    /**
-     * Handle Rettevejledning upload with database persistence
-     */
-    const handleRettevejledningUpload = async (event) => {
-        const file = event.target.files[0];
-        if (!file || !examId) return;
-        
-        try {
-            setUploadStatus('📤 Uploader rettevejledning...');
-            
-            // Upload to Storage and Firestore
-            const uploadResult = await uploadRettevejledning(examId, file);
-            
-            // Update local state
-            grading.setDocuments(prev => ({ ...prev, rettevejledning: file }));
-            setUploadedFiles(prev => ({ ...prev, rettevejledning: uploadResult }));
-            
-            // Update exam context
-            await refreshExam();
-            
-            setUploadStatus('✅ Rettevejledning uploadet!');
-            setTimeout(() => setUploadStatus(''), 3000);
-        } catch (err) {
-            console.error('Error uploading rettevejledning:', err);
-            grading.setError(`Fejl ved upload: ${err.message}`);
-        }
-    };
     
-    /**
-     * Handle Omsætningstabel upload with database persistence
-     */
-    const handleOmsaetningstabelUpload = async (event) => {
-        const file = event.target.files[0];
-        if (!file || !examId) return;
-        
-        try {
-            setUploadStatus('📤 Uploader omsætningstabel...');
-            
-            // Upload to Storage and Firestore
-            const uploadResult = await uploadOmsaetningstabel(examId, file);
-            
-            // Update local state
-            grading.setDocuments(prev => ({ ...prev, omsætningstabel: file }));
-            setUploadedFiles(prev => ({ ...prev, omsætningstabel: uploadResult }));
-            
-            // Update exam context
-            await refreshExam();
-            
-            setUploadStatus('✅ Omsætningstabel uploadet!');
-            setTimeout(() => setUploadStatus(''), 3000);
-        } catch (err) {
-            console.error('Error uploading omsætningstabel:', err);
-            grading.setError(`Fejl ved upload: ${err.message}`);
-        }
-    };
     
-    /**
-     * Handle student submissions upload with uniqueness validation
-     */
-    const handleSubmissionsUpload = async (event) => {
-        const files = Array.from(event.target.files);
-        if (files.length === 0 || !examId) return;
-        
-        try {
-            setUploadStatus('📋 Kontrollerer filer...');
-            const duplicates = [];
-            const validFiles = [];
-            
-            // Check each file for uniqueness
-            for (const file of files) {
-                const exists = await checkFilenameExists(examId, file.name);
-                if (exists) {
-                    duplicates.push(file.name);
-                } else {
-                    validFiles.push(file);
-                }
-            }
-            
-            setDuplicateFiles(duplicates);
-            
-            // Upload valid files
-            if (validFiles.length > 0) {
-                setUploadStatus(`📤 Uploader ${validFiles.length} filer...`);
-                
-                for (let i = 0; i < validFiles.length; i++) {
-                    const file = validFiles[i];
-                    setUploadStatus(`📤 Uploader ${i + 1}/${validFiles.length}: ${file.name}...`);
-                    
-                    try {
-                        await uploadSubmission(examId, file);
-                        console.log(`✅ Uploaded: ${file.name}`);
-                    } catch (err) {
-                        console.error(`❌ Failed to upload ${file.name}:`, err);
-                    }
-                }
-                
-                // Update local state with all files (for grading)
-                grading.setDocuments(prev => ({ 
-                    ...prev, 
-                    elevbesvarelser: [...prev.elevbesvarelser, ...validFiles] 
-                }));
-                
-                setUploadStatus(`✅ ${validFiles.length} filer uploadet!`);
-                setTimeout(() => setUploadStatus(''), 3000);
-            }
-            
-            if (duplicates.length > 0) {
-                grading.setError(`⚠️ ${duplicates.length} filer sprunget over (allerede uploaded): ${duplicates.slice(0, 3).join(', ')}${duplicates.length > 3 ? '...' : ''}`);
-            }
-        } catch (err) {
-            console.error('Error uploading submissions:', err);
-            grading.setError(`Fejl ved upload: ${err.message}`);
-        }
-    };
     
     /**
      * Delete all grading results
@@ -491,10 +340,12 @@ export function MathExamGrader() {
     const handleDeleteAllGradings = async () => {
         if (!examId) return;
         
-        const confirmed = window.confirm(
-            `Er du sikker på at du vil slette ALLE rettelser for denne eksamen?\n\n` +
-            `Dette vil slette ${grading.results.length} rettelser og kan ikke fortrydes!`
-        );
+        const confirmed = await confirm({
+            title: 'Slet alle rettelser?',
+            message: `${grading.results.length} rettelser slettes – både AI-forslag og dine godkendte karakterer. Besvarelserne bliver liggende, så du kan rette igen.`,
+            confirmLabel: 'Slet rettelser',
+            danger: true
+        });
         
         if (!confirmed) return;
         
@@ -510,8 +361,8 @@ export function MathExamGrader() {
             // Refresh exam context
             await refreshExam();
             
-            setUploadStatus(`✅ ${deletedCount} rettelser slettet!`);
-            setTimeout(() => setUploadStatus(''), 3000);
+            setUploadStatus('');
+            toast.success(`${deletedCount} rettelser er slettet`);
         } catch (err) {
             console.error('Error deleting gradings:', err);
             grading.setError(`Fejl ved sletning: ${err.message}`);
@@ -522,7 +373,7 @@ export function MathExamGrader() {
      * Grade Dansk exams using dynamic bedømmelseskema
      * Returns the newly graded results array
      */
-    const handleGradeDanskExams = async () => {
+    const handleGradeDanskExams = async ({ ignoreExisting = false } = {}) => {
         if (!parsedBedoemmelse) {
             grading.setError('Bedømmelseskema ikke parsed endnu. Upload bedømmelseskema først.');
             return [];
@@ -536,7 +387,8 @@ export function MathExamGrader() {
         setDanskGrading(true);
         grading.setError(null);
         
-        const existingResults = [...grading.results];
+        // Fejlede retninger tages med igen, så de kan prøves på ny
+        const existingResults = ignoreExisting ? [] : grading.results.filter(r => !r.error);
         const gradedSubmissionIds = new Set(
             existingResults.map(r => r.submissionId || r.fileName?.replace(/\.[^/.]+$/, ''))
         );
@@ -580,9 +432,9 @@ export function MathExamGrader() {
                         setDanskTotalCost(prev => prev + result.metadata.cost);
                     }
                     
-                    // Wait between requests
+                    // Kort pause mellem elever (429 håndteres desuden med automatisk backoff)
                     if (i < grading.documents.elevbesvarelser.length - 1) {
-                        for (let j = 5; j > 0; j--) {
+                        for (let j = 2; j > 0; j--) {
                             setDanskStatusMessage(`⏸️ Venter ${j} sekunder...`);
                             await new Promise(resolve => setTimeout(resolve, 1000));
                         }
@@ -632,14 +484,18 @@ export function MathExamGrader() {
         
         // Check if ALL submissions are already graded
         const totalSubmissions = grading.documents.elevbesvarelser.length;
-        const gradedSubmissions = grading.results.length;
+        const gradedSubmissions = okResults.length;
         
+        // Når alt slettes og rettes forfra, må de gamle resultater (som stadig ligger
+        // i denne render's state) ikke få retningen til at springe eleverne over
+        let ignoreExisting = false;
         if (gradedSubmissions >= totalSubmissions) {
-            const confirmed = window.confirm(
-                `Alle ${totalSubmissions} besvarelser er allerede rettet.\n\n` +
-                `Vil du slette de eksisterende rettelser og rette igen?\n\n` +
-                `Dette vil erstatte de nuværende rettelser med nye.`
-            );
+            const confirmed = await confirm({
+                title: 'Ret alle igen?',
+                message: `Alle ${totalSubmissions} besvarelser er rettet. De nuværende rettelser og dine godkendte karakterer erstattes.`,
+                confirmLabel: 'Ret alle igen',
+                danger: true
+            });
             
             if (!confirmed) {
                 return;
@@ -652,6 +508,7 @@ export function MathExamGrader() {
                 grading.setResults([]);
                 await refreshExam();
                 setUploadStatus('');
+                ignoreExisting = true;
             } catch (err) {
                 console.error('Error deleting gradings:', err);
                 grading.setError(`Fejl ved sletning: ${err.message}`);
@@ -660,13 +517,13 @@ export function MathExamGrader() {
         }
         
         // Store the count of results before grading
-        const resultsBeforeGrading = grading.results.length;
+        const resultsBeforeGrading = ignoreExisting ? 0 : okResults.length;
         
         // Branch based on exam type and get new results
         let newResults = [];
         if (exam?.type === 'Dansk') {
             // DANSK GRADING FLOW - returns newly graded results
-            newResults = await handleGradeDanskExams();
+            newResults = await handleGradeDanskExams({ ignoreExisting });
         } else {
             // MATEMATIK GRADING FLOW (original logic)
             if (!grading.canProceed()) {
@@ -674,16 +531,11 @@ export function MathExamGrader() {
                 return;
             }
             // ✅ gradeAllExams now returns the newly graded results
-            newResults = await grading.gradeAllExams();
+            newResults = await grading.gradeAllExams({ ignoreExisting });
         }
         
         if (newResults.length > 0) {
             try {
-                console.warn('🚨🚨🚨 SIMON TEST: SAVING RESULTS STARTED 🚨🚨🚨');
-                console.warn('🚨 Number of new results to save:', newResults.length);
-                console.warn('🚨 Exam type:', exam?.type);
-                console.warn('🚨 First result:', newResults[0]);
-                
                 setUploadStatus(`💾 Gemmer ${newResults.length} nye resultater til database...`);
                 
                 let savedCount = 0;
@@ -712,12 +564,6 @@ export function MathExamGrader() {
                         
                         if (exam?.type === 'Dansk') {
                             // Dansk: Save dele structure
-                            console.log('🔍 DEBUG: Preparing Dansk gradingData for submission:', submissionId);
-                            console.log('🔍 DEBUG: result.dele:', result.dele);
-                            console.log('🔍 DEBUG: result.dele length:', result.dele?.length);
-                            console.log('🔍 DEBUG: result.samletKarakter:', result.samletKarakter);
-                            console.log('🔍 DEBUG: result.afrundetKarakter:', result.afrundetKarakter);
-                            
                             gradingData = {
                                 submissionId: submissionId,
                                 elevNavn: result.elevNavn,
@@ -727,13 +573,10 @@ export function MathExamGrader() {
                                 afrundetKarakter: result.afrundetKarakter || 0,
                                 karakterBegrundelse: result.karakterBegrundelse || '',
                                 aiProvider: 'openai',
-                                aiModel: 'gpt-4o',
-                                apiCost: danskTotalCost / newResults.filter(r => !r.error).length || 0,
+                                aiModel: result.metadata?.aiModel || 'ukendt',
+                                apiCost: result.metadata?.cost || 0,
                                 processingTimeMs: 0
                             };
-                            
-                            console.log('🔍 DEBUG: Final gradingData.dele:', gradingData.dele);
-                            console.log('🔍 DEBUG: Final gradingData structure:', JSON.stringify(gradingData, null, 2));
                         } else {
                             // Matematik: Save opgaver structure (original)
                             gradingData = {
@@ -745,9 +588,10 @@ export function MathExamGrader() {
                                 karakter: result.karakter || 0,
                                 karakterBegrundelse: result.karakterBegrundelse || '',
                                 samletFeedback: result.samletFeedback || '',
+                                advarsler: result.advarsler || [],
                                 aiProvider: 'openai',
-                                aiModel: 'gpt-4o',
-                                apiCost: grading.totalCost / newResults.filter(r => !r.error).length || 0,
+                                aiModel: result.aiModel || 'ukendt',
+                                apiCost: result.apiCost || 0,
                                 processingTimeMs: 0
                             };
                         }
@@ -775,7 +619,7 @@ export function MathExamGrader() {
                         // Refresh exam context to show updated stats
                         await refreshExam();
                         
-                        setUploadStatus(`✅ ${savedCount} nye resultater gemt! (Total: ${grading.results.length})${errorCount > 0 ? ` (${errorCount} fejl)` : ''}`);
+                        setUploadStatus(`✅ ${savedCount} nye resultater gemt!${errorCount > 0 ? ` (${errorCount} fejlede – tryk "Ret" igen for at prøve dem igen)` : ''}`);
                     } catch (statsError) {
                         console.error('Error updating stats:', statsError);
                         setUploadStatus(`✅ ${savedCount} resultater gemt! (Kunne ikke opdatere statistik)`);
@@ -796,366 +640,230 @@ export function MathExamGrader() {
         }
     };
     
-    /**
-     * Replace existing file (for rettevejledning/omsætningstabel)
-     */
-    const handleReplaceFile = (type) => {
-        grading.setDocuments(prev => ({ ...prev, [type]: null }));
-        setUploadedFiles(prev => ({ ...prev, [type]: null }));
+
+
+    // ---------- Visning ----------
+
+    const isDansk = exam?.type === 'Dansk';
+    const total = grading.documents.elevbesvarelser.length;
+    const ungraded = Math.max(0, total - okResults.length);
+    const isApproved = (r) => (isDansk ? Boolean(r.lærerGrading) : r.lærerKarakter !== undefined && r.lærerKarakter !== null);
+    const aiKarakter = (r) => (isDansk ? r.afrundetKarakter : r.karakter);
+    const laererKarakter = (r) => (isDansk ? r.lærerGrading?.afrundetKarakter : r.lærerKarakter);
+    const approvedCount = okResults.filter(isApproved).length;
+    const isBusy = grading.grading || danskGrading;
+    const materialeMangler = isDansk ? !parsedBedoemmelse : !grading.canProceed() && total > 0;
+
+    const rowId = (r, idx) => r.submissionId || r.fileName || String(idx);
+    const sorted = grading.results
+        .map((r, idx) => ({ r, idx }))
+        .sort((a, b) => (Number(elevnummerFraFil(a.r.elevNavn)) || 999) - (Number(elevnummerFraFil(b.r.elevNavn)) || 999));
+
+    // Efter godkendelse: åbn næste elev, der mangler gennemsyn
+    const handleApproved = async (idx) => {
+        await refreshExam();
+        const pos = sorted.findIndex(x => x.idx === idx);
+        const next = [...sorted.slice(pos + 1), ...sorted.slice(0, pos)].find(x => !x.r.error && !isApproved(x.r) && x.idx !== idx);
+        setOpenId(next ? rowId(next.r, next.idx) : null);
     };
 
-    /**
-     * Delete a submission file
-     */
-    const handleDeleteSubmission = (idx) => {
-        const newFiles = grading.documents.elevbesvarelser.filter((_, i) => i !== idx);
-        grading.setDocuments(prev => ({ ...prev, elevbesvarelser: newFiles }));
-    };
+    const gennemsnit = (() => {
+        const vals = okResults.map(r => (isApproved(r) ? laererKarakter(r) : aiKarakter(r))).filter(v => typeof v === 'number');
+        return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+    })();
+    const sessionCost = (isDansk ? danskTotalCost : grading.totalCost) || 0;
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-            <div className="max-w-6xl mx-auto">
-                {/* Combined compact header block */}
-                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                    {/* Exam Header Row - Compact */}
-                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-100">
-                        <div className="flex items-center gap-6">
-                            {/* Exam Number/Title */}
-                            <h1 className="text-3xl font-bold text-gray-800">
-                                {exam?.beskrivelse || 'Prøve'}
-                            </h1>
-                            
-                            {/* Metadata */}
-                            <div className="flex items-center gap-4 text-sm text-gray-600">
-                                <div className="flex items-center gap-2">
-                                    <Calendar className="w-4 h-4" />
-                                    <span>Dato:</span>
-                                    <span className="font-medium">{formatDate(exam?.dato)}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Users className="w-4 h-4" />
-                                    <span>Klasse:</span>
-                                    <span className="font-medium">{exam?.klasse || '-'}</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {/* Type Badge */}
-                        <span className={`px-4 py-2 rounded-full text-sm font-semibold border ${getTypeBadgeColor(exam?.type)}`}>
-                            {exam?.type || 'Ukendt'}
-                        </span>
+        <ExamShell
+            exam={exam}
+            step="retning"
+            actions={(ungraded > 0 || isBusy) &&
+                <button
+                    type="button"
+                    onClick={handleGradeAllExams}
+                    disabled={isBusy || ungraded === 0 || !examId || (isDansk ? !parsedBedoemmelse : !grading.canProceed())}
+                    className="btn-primary"
+                >
+                    {isBusy ? <Loader2 /> : null}
+                    {isBusy
+                        ? `Retter ${okResults.length} af ${total}…`
+                        : ungraded > 0
+                            ? `Ret ${ungraded} ${ungraded === 1 ? 'besvarelse' : 'besvarelser'}`
+                            : 'Alle er rettet'}
+                </button>
+            }
+        >
+            <div className="space-y-4">
+                {(grading.error || uploadError) && (
+                    <Notice title="Noget gik galt">{grading.error || uploadError}</Notice>
+                )}
+
+                {materialeMangler && !grading.error && (
+                    <Notice tone="info" title="Materialet mangler" action={<Link to={`/exams/${examId}/edit`} className="btn-secondary btn-sm self-center">Gå til materiale</Link>}>
+                        {isDansk ? 'Bedømmelseskemaet skal være uploadet og læst, før besvarelserne kan rettes.' : 'Rettevejledning og omsætningstabel skal være på plads, før besvarelserne kan rettes.'}
+                    </Notice>
+                )}
+
+                {uploadStatus && !isBusy && (
+                    <p className="text-sm text-ink-soft" role="status">{uploadStatus}</p>
+                )}
+
+                {isBusy && (
+                    <GradingProgress
+                        statusMessage={isDansk ? danskStatusMessage : grading.statusMessage}
+                        currentTaskPhase={isDansk ? danskCurrentTaskPhase : grading.currentTaskPhase}
+                        completedCount={okResults.length}
+                        totalCount={total}
+                        retryInfo={grading.retryInfo}
+                        currentFileName={elevnavnFraFil(grading.documents.elevbesvarelser[okResults.length]?.name)}
+                    />
+                )}
+
+                {total === 0 && grading.results.length === 0 && (
+                    <div className="surface">
+                        <EmptyState title="Ingen besvarelser at rette" action={<Link to={`/exams/${examId}/matrix`} className="btn-primary">Upload besvarelser</Link>}>
+                            Upload elevernes besvarelser, så kan de rettes her.
+                        </EmptyState>
                     </div>
-                    
-                    {/* Upload status */}
-                    {uploadStatus && (
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                            <p className="text-sm text-blue-800 font-medium">{uploadStatus}</p>
-                            {uploading && uploadProgress > 0 && (
-                                <div className="mt-2 w-full bg-blue-200 rounded-full h-2">
-                                    <div
-                                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                                        style={{ width: `${uploadProgress}%` }}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    )}
+                )}
 
-                    {/* Error Display */}
-                    {(grading.error || uploadError) && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-3">
-                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                            <div>
-                                <p className="font-semibold text-red-800 text-sm">Fejl</p>
-                                <p className="text-red-700 text-sm">{grading.error || uploadError}</p>
-                            </div>
-                        </div>
-                    )}
+                {grading.results.length > 0 && grading.results[0]?.fromHistory && (
+                    <Notice title="Gamle rettelser" action={<button type="button" className="btn-danger btn-sm self-center" onClick={handleDeleteAllGradings}>Slet og ret igen</button>}>
+                        Disse rettelser er gemt i et ældre format uden detaljer pr. opgave.
+                    </Notice>
+                )}
 
-                    {/* Files & Action buttons row */}
-                    <div className="flex items-center justify-between mb-4">
-                        {/* File Links */}
-                        <div className="flex items-center gap-3 text-sm">
-                            {/* Matematik: Show Rettevejledning and Omsætningstabel */}
-                            {exam?.type === 'Matematik' && (
-                                <>
-                                    {exam?.rettevejledningRef && (
-                                        <a
-                                            href="#"
-                                            onClick={async (e) => {
-                                                e.preventDefault();
-                                                const url = await getFileDownloadURL(exam.rettevejledningRef.storagePath);
-                                                window.open(url, '_blank');
-                                            }}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors"
-                                        >
-                                            <FileText className="w-4 h-4" />
-                                            <span>Rettevejledning</span>
-                                            <ExternalLink className="w-3 h-3" />
-                                        </a>
-                                    )}
-                                    {exam?.omsætningstabelRef && (
-                                        <a
-                                            href="#"
-                                            onClick={async (e) => {
-                                                e.preventDefault();
-                                                const url = await getFileDownloadURL(exam.omsætningstabelRef.storagePath);
-                                                window.open(url, '_blank');
-                                            }}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg transition-colors"
-                                        >
-                                            <FileText className="w-4 h-4" />
-                                            <span>Omsætningstabel</span>
-                                            <ExternalLink className="w-3 h-3" />
-                                        </a>
-                                    )}
-                                </>
-                            )}
-                            {/* Dansk: Only show Bedømmelseskema */}
-                            {exam?.type === 'Dansk' && exam?.bedoemmelseskemaRef && (
-                                <a
-                                    href="#"
-                                    onClick={async (e) => {
-                                        e.preventDefault();
-                                        const url = await getFileDownloadURL(exam.bedoemmelseskemaRef.storagePath);
-                                        window.open(url, '_blank');
-                                    }}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg transition-colors"
-                                >
-                                    <FileText className="w-4 h-4" />
-                                    <span>Bedømmelseskema</span>
-                                    <ExternalLink className="w-3 h-3" />
-                                </a>
-                            )}
-                            {(grading.totalCost > 0 || danskTotalCost > 0) && (
-                                <div className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg text-xs font-medium text-indigo-700">
-                                    💰 ${((exam?.type === 'Dansk' ? danskTotalCost : grading.totalCost) || 0).toFixed(4)} (ca. {(((exam?.type === 'Dansk' ? danskTotalCost : grading.totalCost) || 0) * 7).toFixed(2)} kr)
-                                </div>
-                            )}
+                {grading.results.length > 0 && !grading.results[0]?.fromHistory && (
+                    <div className="surface overflow-hidden">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between px-4 sm:px-5 py-4 border-b border-line">
+                            <p className="text-sm">
+                                <span className="font-semibold"><span className="num">{approvedCount}</span> af <span className="num">{okResults.length}</span> godkendt</span>
+                                {gennemsnit !== null && <span className="text-ink-soft">. Gennemsnit <span className="num">{gennemsnit.toFixed(1).replace('.', ',')}</span></span>}
+                                {approvedCount < okResults.length && <span className="text-ink-soft">. Åbn en elev for at tjekke og godkende karakteren.</span>}
+                            </p>
+                            <GradeLegend />
                         </div>
-                        
-                        {/* Action Buttons */}
-                        <div className="flex items-center gap-3">
-                            {/* Ret opgaver button */}
-                            <button
-                                onClick={handleGradeAllExams}
-                                disabled={
-                                    (exam?.type === 'Matematik' && !grading.canProceed()) ||
-                                    (exam?.type === 'Dansk' && (!parsedBedoemmelse || grading.documents.elevbesvarelser.length === 0)) ||
-                                    grading.grading ||
-                                    danskGrading ||
-                                    !examId ||
-                                    grading.results.length >= grading.documents.elevbesvarelser.length
-                                }
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white disabled:text-gray-500 font-semibold rounded-lg transition-all flex items-center gap-2 text-sm shadow-md"
-                                title={grading.results.length >= grading.documents.elevbesvarelser.length ? "Alle besvarelser er allerede rettet" : ""}
-                            >
-                                {(grading.grading || danskGrading) ? (
-                                    <>
-                                        <Loader2 />
-                                        Retter {grading.results.length}/{grading.documents.elevbesvarelser.length}
-                                    </>
-                                ) : (
-                                    <>
-                                        <CheckCircle className="w-4 h-4" />
-                                        {grading.results.length > 0
-                                            ? `Rettet (${grading.results.length}/${grading.documents.elevbesvarelser.length})`
-                                            : `Ret ${grading.documents.elevbesvarelser.length - grading.results.length} af ${grading.documents.elevbesvarelser.length}`
-                                        }
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                    
-                    {/* Grading Progress */}
-                    {(grading.grading || danskGrading) && (grading.statusMessage || danskStatusMessage) && (
-                        <div className="mb-4">
-                            <GradingProgress
-                                statusMessage={danskGrading ? danskStatusMessage : grading.statusMessage}
-                                currentTaskPhase={danskGrading ? danskCurrentTaskPhase : grading.currentTaskPhase}
-                                completedCount={grading.results.length}
-                                totalCount={grading.documents.elevbesvarelser.length}
-                                retryInfo={grading.retryInfo}
-                                requestDebugInfo={null}
-                                currentFileName={grading.documents.elevbesvarelser[grading.results.length]?.name || ''}
-                            />
-                        </div>
-                    )}
-                    
-                    {/* Compact Existing Results Info + Overview */}
-                    {grading.results.length > 0 && !grading.results[0]?.fromHistory && (
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
-                            {/* Header row */}
-                            <div className="flex items-center justify-between mb-3">
-                                <div className="flex items-center gap-2">
-                                    <CheckCircle className="w-5 h-5 text-blue-600" />
-                                    <h3 className="font-bold text-blue-900 text-base">
-                                        📊 Eksisterende rettelser ({grading.results.length})
-                                    </h3>
-                                </div>
-                                <p className="text-blue-700 text-xs">
-                                    {exam?.type === 'Matematik' ? (
-                                        <>
-                                            Gennemsnit: {(grading.results.reduce((sum, r) => sum + (r.totalPoint || 0), 0) / grading.results.length).toFixed(1)} point
-                                            {' • '}
-                                        </>
-                                    ) : null}
-                                    Karakter: {(grading.results.reduce((sum, r) => sum + ((r.afrundetKarakter ?? r.karakter) || 0), 0) / grading.results.length).toFixed(1)}
-                                </p>
-                            </div>
-                            
-                            {/* Compact Overview Stats */}
-                            <div className="grid grid-cols-4 gap-3">
-                                <div className="bg-white rounded-lg p-3 text-center border border-blue-100">
-                                    <p className="text-xs text-gray-600 mb-1">Antal prøver</p>
-                                    <p className="text-2xl font-bold text-blue-600">{grading.results.length}</p>
-                                </div>
-                                <div className="bg-white rounded-lg p-3 text-center border border-green-100">
-                                    <p className="text-xs text-gray-600 mb-1">Gns. karakter</p>
-                                    <p className="text-2xl font-bold text-green-600">
-                                        {(grading.results.reduce((sum, r) => sum + ((r.afrundetKarakter ?? r.karakter) || 0), 0) / grading.results.length).toFixed(1)}
-                                    </p>
-                                </div>
-                                {exam?.type === 'Matematik' ? (
-                                    <>
-                                        <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
-                                            <p className="text-xs text-gray-600 mb-1">Gns. point</p>
-                                            <p className="text-2xl font-bold text-purple-600">
-                                                {Math.round(grading.results.reduce((sum, r) => sum + (r.totalPoint || 0), 0) / grading.results.length)}
-                                            </p>
-                                        </div>
-                                        <div className="bg-white rounded-lg p-3 text-center border border-amber-100">
-                                            <p className="text-xs text-gray-600 mb-1">Højeste point</p>
-                                            <p className="text-2xl font-bold text-amber-600">
-                                                {Math.max(...grading.results.map(r => r.totalPoint || 0))}
-                                            </p>
-                                        </div>
-                                    </>
-                                ) : exam?.type === 'Dansk' ? (
-                                    <>
-                                        <div className="bg-white rounded-lg p-3 text-center border border-purple-100">
-                                            <p className="text-xs text-gray-600 mb-1">Gns. beregnet</p>
-                                            <p className="text-2xl font-bold text-purple-600">
-                                                {(grading.results.reduce((sum, r) => sum + (r.samletKarakter || 0), 0) / grading.results.length).toFixed(2)}
-                                            </p>
-                                        </div>
-                                        <div className="bg-white rounded-lg p-3 text-center border border-amber-100">
-                                            <p className="text-xs text-gray-600 mb-1">Højeste</p>
-                                            <p className="text-2xl font-bold text-amber-600">
-                                                {Math.max(...grading.results.map(r => r.afrundetKarakter || r.karakter || 0))}
-                                            </p>
-                                        </div>
-                                    </>
-                                ) : null}
-                            </div>
-                        </div>
-                    )}
-                </div>
 
-                {/* Results */}
-                {grading.results.length > 0 && (
-                    <div className="space-y-6">
-                        {/* Check if results are from old format (missing detailed opgaver data) */}
-                        {grading.results[0]?.fromHistory ? (
-                            <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-6">
-                                <div className="flex items-start gap-3">
-                                    <span className="text-3xl">⚠️</span>
-                                    <div className="flex-1">
-                                        <h3 className="font-bold text-amber-900 text-lg mb-2">
-                                            Gamle rettelser fundet
-                                        </h3>
-                                        <p className="text-amber-800 mb-4">
-                                            Disse rettelser er gemt i det gamle format og indeholder kun oversigtsdata (karakter og point).
-                                            For at se detaljerede resultater med feedback til hver opgave, skal du rette de igen.
-                                        </p>
-                                        
-                                        <div className="bg-white/70 rounded-lg p-4 mb-4">
-                                            <h4 className="font-semibold text-amber-900 mb-3">Rettede elever:</h4>
-                                            <div className="grid gap-2">
-                                                {grading.results.map((result, idx) => (
-                                                    <div key={idx} className="flex items-center justify-between p-3 bg-amber-100/50 rounded border border-amber-200">
-                                                        <span className="font-medium text-amber-900">{result.elevNavn}</span>
-                                                        <div className="flex items-center gap-4 text-sm">
-                                                            <span className="text-amber-700">Point: <strong>{result.totalPoint}</strong></span>
-                                                            <span className="px-3 py-1 bg-green-600 text-white rounded-full font-bold">
-                                                                {result.karakter}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                        
-                                        <p className="text-sm text-amber-700 mb-3">
-                                            <strong>Note:</strong> Slet disse gamle rettelser og ret opgaverne igen for at få fuld detalje-visning.
-                                        </p>
-                                        
+                        <div className="hidden sm:grid grid-cols-[2.5rem_minmax(0,1fr)_6rem_5rem_5rem_9rem_1.25rem] gap-x-3 px-5 py-2 border-b border-line bg-paper/60 text-[13px] font-semibold text-ink-soft" aria-hidden="true">
+                            <span className="text-right">Nr.</span>
+                            <span>Elev</span>
+                            <span>{isDansk ? 'Gennemsnit' : 'Point'}</span>
+                            <span>AI</span>
+                            <span>Din</span>
+                            <span>Status</span>
+                            <span />
+                        </div>
+                        <ul>
+                            {sorted.map(({ r, idx }) => {
+                                const id = rowId(r, idx);
+                                const open = openId === id;
+                                const approved = !r.error && isApproved(r);
+                                return (
+                                    <li key={id} className={`border-b border-line last:border-b-0 ${open ? 'bg-paper/40' : ''}`}>
                                         <button
-                                            onClick={() => {
-                                                if (window.confirm('Denne handling kan ikke fortrydes. Ønsker du at fortsætte?')) {
-                                                    handleDeleteAllGradings();
-                                                }
-                                            }}
-                                            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition-all flex items-center gap-2"
+                                            type="button"
+                                            onClick={() => setOpenId(open ? null : id)}
+                                            aria-expanded={open}
+                                            className="w-full grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[2.5rem_minmax(0,1fr)_6rem_5rem_5rem_9rem_1.25rem] items-center gap-x-3 gap-y-2 px-4 sm:px-5 py-3 text-left hover:bg-paper/60 transition-colors"
                                         >
-                                            <Trash2 className="w-4 h-4" />
-                                            Slet gamle rettelser
+                                            <span className="hidden sm:block num text-sm text-ink-soft text-right">{elevnummerFraFil(r.elevNavn)}</span>
+                                            <span className="font-medium truncate">{elevnavnFraFil(r.elevNavn) || r.elevNavn}</span>
+                                            <span className="hidden sm:block num text-sm text-ink-soft">
+                                                {!r.error && !isDansk && r.opgaver?.length > 0 && (
+                                                    <>{approved ? r.lærerTotalPoint : r.totalPoint} / {r.opgaver.reduce((s, o) => s + (Number(o.maxPoint) || 0), 0)} p</>
+                                                )}
+                                                {!r.error && isDansk && typeof r.samletKarakter === 'number' && (
+                                                    <>{((approved ? r.lærerGrading?.samletKarakter : r.samletKarakter) ?? 0).toFixed(1).replace('.', ',')}</>
+                                                )}
+                                            </span>
+                                            <span className="hidden sm:flex justify-start">
+                                                {!r.error && <GradeMark karakter={aiKarakter(r)} size="sm" title="AI-forslag" />}
+                                            </span>
+                                            <span className="hidden sm:flex justify-start">
+                                                {approved && <GradeMark karakter={laererKarakter(r)} approved size="sm" />}
+                                            </span>
+                                            <span className="flex items-center gap-2 justify-end sm:justify-start">
+                                                {!r.error && (
+                                                    <span className="sm:hidden">
+                                                        <GradeMark karakter={approved ? laererKarakter(r) : aiKarakter(r)} approved={approved} size="sm" />
+                                                    </span>
+                                                )}
+                                                {r.error ? (
+                                                    <StatusPill tone="attention">Fejl</StatusPill>
+                                                ) : approved ? (
+                                                    <StatusPill tone="ok">Godkendt</StatusPill>
+                                                ) : r.advarsler?.length ? (
+                                                    <StatusPill tone="attention">Tjek advarsel</StatusPill>
+                                                ) : (
+                                                    <StatusPill>Til gennemsyn</StatusPill>
+                                                )}
+                                            </span>
+                                            <ChevronDown className={`hidden sm:block w-4 h-4 text-ink-faint transition-transform ${open ? 'rotate-180' : ''}`} />
                                         </button>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <>
-                                {grading.results.map((result, idx) => {
-                                    // Betinget rendering baseret på exam type
-                                    if (exam?.type === 'Dansk') {
-                                        return (
-                                            <DanskStudentResult
-                                                key={idx}
-                                                result={result}
-                                                index={idx}
-                                                parsedBedoemmelse={parsedBedoemmelse}
-                                                examId={examId}
-                                                onSave={(idx, lærerGrading) => {
-                                                    // Update result with lærer grading
-                                                    grading.setResults(prev => {
-                                                        const updated = [...prev];
-                                                        updated[idx] = {
-                                                            ...updated[idx],
-                                                            lærerGrading
-                                                        };
-                                                        return updated;
-                                                    });
-                                                }}
-                                            />
-                                        );
-                                    } else {
-                                        // Matematik (original)
-                                        return (
-                                            <StudentResult
-                                                key={idx}
-                                                result={result}
-                                                index={idx}
-                                                editMode={grading.editMode[idx] || false}
-                                                tempPoints={grading.tempLærerPoints}
-                                                detailedFeedback={grading.detailedFeedback}
-                                                loadingDetailedFeedback={grading.loadingDetailedFeedback}
-                                                onStartEdit={() => grading.startEditing(idx)}
-                                                onSaveEdit={() => grading.saveLærerGrading(idx)}
-                                                onCancelEdit={() => grading.cancelEditing(idx)}
-                                                onUpdatePoint={grading.updateTempLærerPoint}
-                                                onAskAIDetails={grading.askAIForDetails}
-                                                examId={examId}
-                                            />
-                                        );
-                                    }
-                                })}
-                            </>
-                        )}
+
+                                        {open && (
+                                            <div className="px-4 sm:px-5 pb-5">
+                                                {r.error ? (
+                                                    <Notice title="Besvarelsen kunne ikke rettes">
+                                                        {r.error} Tryk "Ret {ungraded} {ungraded === 1 ? 'besvarelse' : 'besvarelser'}" øverst for at prøve igen.
+                                                    </Notice>
+                                                ) : isDansk ? (
+                                                    <DanskStudentResult
+                                                        result={r}
+                                                        index={idx}
+                                                        parsedBedoemmelse={parsedBedoemmelse}
+                                                        examId={examId}
+                                                        submissions={submissions}
+                                                        onSave={(i, lærerGrading) => {
+                                                            grading.setResults(prev => {
+                                                                const updated = [...prev];
+                                                                updated[i] = { ...updated[i], lærerGrading };
+                                                                return updated;
+                                                            });
+                                                            handleApproved(i);
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <StudentResult
+                                                        result={r}
+                                                        index={idx}
+                                                        editMode={grading.editMode[idx] || false}
+                                                        tempPoints={grading.tempLærerPoints}
+                                                        detailedFeedback={grading.detailedFeedback}
+                                                        loadingDetailedFeedback={grading.loadingDetailedFeedback}
+                                                        onStartEdit={() => grading.startEditing(idx)}
+                                                        onSaveEdit={async () => {
+                                                            const ok = await grading.saveLærerGrading(idx);
+                                                            if (ok) handleApproved(idx);
+                                                        }}
+                                                        onCancelEdit={() => grading.cancelEditing(idx)}
+                                                        onUpdatePoint={grading.updateTempLærerPoint}
+                                                        onAskAIDetails={grading.askAIForDetails}
+                                                        examId={examId}
+                                                        submissions={submissions}
+                                                        omsaetningstabel={exam?.omsaetningstabelData}
+                                                    />
+                                                )}
+                                            </div>
+                                        )}
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </div>
+                )}
+
+                {grading.results.length > 0 && (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 text-[13px] text-ink-soft">
+                        <span>
+                            {sessionCost > 0 && <>AI-forbrug i denne session: ca. <span className="num">{(sessionCost * 7).toFixed(2).replace('.', ',')}</span> kr.</>}
+                        </span>
+                        <button type="button" className="btn-ghost btn-sm text-pen hover:text-pen" onClick={handleDeleteAllGradings} disabled={isBusy}>
+                            <Trash2 className="w-3.5 h-3.5" /> Slet alle rettelser
+                        </button>
                     </div>
                 )}
             </div>
-        </div>
+        </ExamShell>
     );
 }

@@ -1,3 +1,98 @@
+@import '@fontsource-variable/public-sans';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-paper text-ink font-sans;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  h1, h2, h3 {
+    @apply text-ink;
+    letter-spacing: -0.01em;
+  }
+  :focus-visible {
+    outline: 2px solid theme('colors.focus');
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Flader */
+  .surface {
+    @apply bg-surface border border-line rounded-surface;
+  }
+
+  /* Knapper */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-control text-sm font-semibold
+      whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-ink text-white hover:bg-[#2C3E52];
+  }
+  .btn-secondary {
+    @apply btn bg-surface text-ink border border-line-strong hover:bg-paper;
+  }
+  .btn-ghost {
+    @apply btn text-ink-soft hover:text-ink hover:bg-paper;
+  }
+  .btn-danger {
+    @apply btn bg-pen text-white hover:bg-[#9A2E24];
+  }
+  .btn-sm {
+    @apply h-8 px-2.5 text-[13px];
+  }
+  .btn-icon {
+    @apply btn h-8 w-8 px-0 text-ink-soft hover:text-ink hover:bg-paper;
+  }
+
+  /* Formularer */
+  .field-label {
+    @apply block text-sm font-semibold text-ink mb-1.5;
+  }
+  .field-hint {
+    @apply text-[13px] text-ink-soft mt-1.5;
+  }
+  .field-error {
+    @apply text-[13px] text-pen mt-1.5;
+  }
+  .input {
+    @apply block w-full h-10 px-3 rounded-control border border-line-strong bg-surface text-ink text-[15px]
+      placeholder:text-ink-faint focus:outline-none focus:border-focus focus:ring-2 focus:ring-focus/20;
+  }
+  .input-invalid {
+    @apply border-pen focus:border-pen focus:ring-pen/20;
+  }
+
+  /* Tabeller */
+  .table {
+    @apply w-full text-sm;
+  }
+  :where(.table) th {
+    @apply text-left text-[13px] font-semibold text-ink-soft px-3 sm:px-4 py-2.5 border-b border-line bg-paper/60;
+  }
+  :where(.table) td {
+    @apply px-3 sm:px-4 py-3 border-b border-line align-middle;
+  }
+  :where(.table) tbody:last-child tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}

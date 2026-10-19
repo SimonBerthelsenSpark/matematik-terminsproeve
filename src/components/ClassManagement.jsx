@@ -1,412 +1,329 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { useClasses } from '../hooks/useClasses.js';
-import { Loader2, AlertCircle, Trash2, X, CheckCircle } from './Icons.jsx';
+import { Loader2, Trash2, Plus, X, Users } from './Icons.jsx';
+import { PageHeader, Spinner, Notice, EmptyState, useConfirm } from './ui.jsx';
 
 /**
- * ClassManagement - Component for managing classes and students
+ * Klasser og elever: liste til venstre, valgt klasse til højre.
  */
 export function ClassManagement() {
-  const {
-    classes,
-    loading,
-    error,
-    createClass,
-    deleteClass,
-    addStudent,
-    getStudents,
-    deleteStudent
-  } = useClasses();
+  const confirm = useConfirm();
+  const { classes, loading, error, createClass, deleteClass, addStudent, getStudents, deleteStudent } = useClasses();
 
-  const [showCreateClass, setShowCreateClass] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [students, setStudents] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [newClassName, setNewClassName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [expandedClass, setExpandedClass] = useState(null);
-  const [classStudents, setClassStudents] = useState({});
-  const [loadingStudents, setLoadingStudents] = useState({});
 
-  /**
-   * Handle class creation
-   */
+  const selected = classes.find(c => c.id === selectedId) || null;
+
+  // Vælg første klasse automatisk
+  useEffect(() => {
+    if (!selectedId && classes.length > 0) setSelectedId(classes[0].id);
+    if (selectedId && classes.length > 0 && !classes.some(c => c.id === selectedId)) setSelectedId(classes[0].id);
+  }, [classes, selectedId]);
+
+  const loadStudents = useCallback(async (classId) => {
+    if (!classId) return;
+    try {
+      setLoadingStudents(true);
+      setStudents(await getStudents(classId));
+    } catch (err) {
+      toast.error(`Eleverne kunne ikke indlæses: ${err.message}`);
+    } finally {
+      setLoadingStudents(false);
+    }
+  }, [getStudents]);
+
+  useEffect(() => { loadStudents(selectedId); }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleCreateClass = async (e) => {
     e.preventDefault();
-    if (!newClassName.trim()) return;
-
+    const name = newClassName.trim();
+    if (!name) return;
     try {
       setCreating(true);
-      await createClass(newClassName.trim());
+      const id = await createClass(name);
       setNewClassName('');
-      setShowCreateClass(false);
+      setShowCreate(false);
+      if (id) setSelectedId(id);
+      toast.success(`Klassen ${name} er oprettet`);
     } catch (err) {
-      alert(`Fejl ved oprettelse af klasse: ${err.message}`);
+      toast.error(`Klassen kunne ikke oprettes: ${err.message}`);
     } finally {
       setCreating(false);
     }
   };
 
-  /**
-   * Handle class deletion
-   */
-  const handleDeleteClass = async (classId, className) => {
-    const confirmed = window.confirm(
-      `Er du sikker på at du vil slette klassen "${className}"?\n\n` +
-      `Dette vil også slette alle elever i klassen.\n\n` +
-      `Denne handling kan ikke fortrydes!`
-    );
-
-    if (!confirmed) return;
-
+  const handleDeleteClass = async () => {
+    if (!selected) return;
+    const ok = await confirm({
+      title: `Slet klassen ${selected.className}?`,
+      message: `Klassen og dens ${selected.studentCount || 0} elever slettes. Prøver for klassen bliver ikke slettet.`,
+      confirmLabel: 'Slet klasse',
+      danger: true
+    });
+    if (!ok) return;
     try {
-      await deleteClass(classId);
-      // Clear students from local state if the class was expanded
-      if (classStudents[classId]) {
-        const newStudents = { ...classStudents };
-        delete newStudents[classId];
-        setClassStudents(newStudents);
-      }
-      if (expandedClass === classId) {
-        setExpandedClass(null);
-      }
+      await deleteClass(selected.id);
+      setSelectedId(null);
+      toast.success('Klassen er slettet');
     } catch (err) {
-      alert(`Fejl ved sletning af klasse: ${err.message}`);
-    }
-  };
-
-  /**
-   * Toggle class expansion and load students
-   */
-  const toggleClass = async (classId) => {
-    if (expandedClass === classId) {
-      setExpandedClass(null);
-    } else {
-      setExpandedClass(classId);
-      // Load students if not already loaded
-      if (!classStudents[classId]) {
-        try {
-          setLoadingStudents({ ...loadingStudents, [classId]: true });
-          const students = await getStudents(classId);
-          setClassStudents({ ...classStudents, [classId]: students });
-        } catch (err) {
-          alert(`Fejl ved indlæsning af elever: ${err.message}`);
-        } finally {
-          setLoadingStudents({ ...loadingStudents, [classId]: false });
-        }
-      }
-    }
-  };
-
-  /**
-   * Reload students for a class
-   */
-  const reloadStudents = async (classId) => {
-    try {
-      setLoadingStudents({ ...loadingStudents, [classId]: true });
-      const students = await getStudents(classId);
-      setClassStudents({ ...classStudents, [classId]: students });
-    } catch (err) {
-      alert(`Fejl ved genindlæsning af elever: ${err.message}`);
-    } finally {
-      setLoadingStudents({ ...loadingStudents, [classId]: false });
+      toast.error(`Klassen kunne ikke slettes: ${err.message}`);
     }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">Klasser</h2>
-          <p className="text-gray-600 mt-1">Administrer klasser og elever</p>
-        </div>
-        <button
-          onClick={() => setShowCreateClass(!showCreateClass)}
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors"
-        >
-          {showCreateClass ? 'Annuller' : '+ Opret klasse'}
-        </button>
-      </div>
+    <>
+      <PageHeader
+        title="Klasser"
+        description="Eleverne bruges til at navngive og samle besvarelserne for hver prøve."
+        actions={
+          <button type="button" className="btn-primary" onClick={() => setShowCreate(v => !v)} aria-expanded={showCreate}>
+            <Plus className="w-4 h-4" /> Ny klasse
+          </button>
+        }
+      />
 
-      {/* Create Class Form */}
-      {showCreateClass && (
-        <form onSubmit={handleCreateClass} className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={newClassName}
-              onChange={(e) => setNewClassName(e.target.value)}
-              placeholder="Klassenavn (f.eks. 9A)"
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              autoFocus
-            />
-            <button
-              type="submit"
-              disabled={creating || !newClassName.trim()}
-              className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
-            >
-              {creating ? <Loader2 /> : 'Opret'}
+      {showCreate && (
+        <form onSubmit={handleCreateClass} className="surface p-4 mb-6 flex flex-col sm:flex-row gap-2 sm:items-end">
+          <div className="flex-1">
+            <label htmlFor="new-class" className="field-label">Klassens navn</label>
+            <input id="new-class" className="input" value={newClassName} onChange={(e) => setNewClassName(e.target.value)} placeholder="Fx 9.A" autoFocus />
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" className="btn-primary" disabled={creating || !newClassName.trim()}>
+              {creating && <Loader2 />} Opret klasse
             </button>
+            <button type="button" className="btn-ghost" onClick={() => setShowCreate(false)}>Annuller</button>
           </div>
         </form>
       )}
 
-      {/* Loading State */}
-      {loading && (
-        <div className="text-center py-12">
-          <Loader2 />
-          <p className="text-gray-600 mt-4">Indlæser klasser...</p>
-        </div>
-      )}
+      {loading && classes.length === 0 && <Spinner label="Indlæser klasser…" />}
+      {error && !loading && <Notice title="Klasserne kunne ikke indlæses">{error}</Notice>}
 
-      {/* Error State */}
-      {error && !loading && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <div className="flex items-start gap-3">
-            <AlertCircle />
-            <div>
-              <p className="font-semibold text-red-800">Kunne ikke indlæse klasser</p>
-              <p className="text-red-700 text-sm mt-1">{error}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Empty State */}
       {!loading && !error && classes.length === 0 && (
-        <div className="text-center py-12">
-          <div className="text-gray-400 mb-4">
-            <svg
-              className="mx-auto h-16 w-16"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-              />
-            </svg>
-          </div>
-          <h3 className="text-xl font-semibold text-gray-800 mb-2">
-            Ingen klasser endnu
-          </h3>
-          <p className="text-gray-600">
-            Opret din første klasse for at komme i gang
-          </p>
+        <div className="surface">
+          <EmptyState title="Ingen klasser endnu" action={<button className="btn-primary" onClick={() => setShowCreate(true)}><Plus className="w-4 h-4" /> Opret første klasse</button>}>
+            Opret klassen og tilføj eleverne. Du kan indsætte hele elevlisten på én gang.
+          </EmptyState>
         </div>
       )}
 
-      {/* Classes List */}
-      {!loading && !error && classes.length > 0 && (
-        <div className="space-y-3">
-          {classes.map((cls) => (
-            <ClassCard
-              key={cls.id}
-              classData={cls}
-              isExpanded={expandedClass === cls.id}
-              students={classStudents[cls.id] || []}
-              loadingStudents={loadingStudents[cls.id] || false}
-              onToggle={() => toggleClass(cls.id)}
-              onDelete={() => handleDeleteClass(cls.id, cls.className)}
-              onStudentAdded={() => reloadStudents(cls.id)}
-              onStudentDeleted={() => reloadStudents(cls.id)}
+      {!error && classes.length > 0 && (
+        <div className="grid gap-6 md:grid-cols-[15rem_minmax(0,1fr)] items-start">
+          {/* Klasseliste */}
+          <nav aria-label="Klasser" className="surface p-1.5">
+            <ul className="flex md:flex-col gap-1 overflow-x-auto">
+              {classes.map(cls => {
+                const active = cls.id === selectedId;
+                return (
+                  <li key={cls.id} className="shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(cls.id)}
+                      aria-current={active ? 'true' : undefined}
+                      className={`w-full flex items-center justify-between gap-4 rounded-control px-3 py-2 text-left text-sm transition-colors ${
+                        active ? 'bg-ink text-white' : 'hover:bg-paper'
+                      }`}
+                    >
+                      <span className="font-semibold">{cls.className}</span>
+                      <span className={`num text-[13px] ${active ? 'text-white/70' : 'text-ink-soft'}`}>{cls.studentCount || 0}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
+          {/* Valgt klasse */}
+          {selected && (
+            <ClassDetail
+              key={selected.id}
+              cls={selected}
+              students={students}
+              loading={loadingStudents}
+              onDeleteClass={handleDeleteClass}
               addStudent={addStudent}
               deleteStudent={deleteStudent}
+              reload={() => loadStudents(selected.id)}
             />
-          ))}
+          )}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
 /**
- * ClassCard - Individual class card with student management
+ * Fortolk en indsat elevliste. Hver linje: "nummer navn" eller bare "navn".
+ * Uden nummer fortsættes nummereringen fra det højeste eksisterende nummer.
  */
-function ClassCard({
-  classData,
-  isExpanded,
-  students,
-  loadingStudents,
-  onToggle,
-  onDelete,
-  onStudentAdded,
-  onStudentDeleted,
-  addStudent,
-  deleteStudent
-}) {
-  const [showAddStudent, setShowAddStudent] = useState(false);
-  const [studentNumber, setStudentNumber] = useState('');
-  const [studentName, setStudentName] = useState('');
-  const [adding, setAdding] = useState(false);
+export function parseElevliste(text, startNummer = 1) {
+  let next = startNummer;
+  return String(text)
+    .split(/\r?\n/)
+    .map(l => l.replace(/\t/g, ' ').trim())
+    .filter(Boolean)
+    .map(line => {
+      const m = line.match(/^(\d+)[.\s,;:)-]+(.+)$/);
+      if (m) {
+        next = Math.max(next, Number(m[1]) + 1);
+        return { studentNumber: m[1], studentName: m[2].trim() };
+      }
+      return { studentNumber: String(next++), studentName: line };
+    });
+}
 
-  /**
-   * Handle student addition
-   */
-  const handleAddStudent = async (e) => {
+function ClassDetail({ cls, students, loading, onDeleteClass, addStudent, deleteStudent, reload }) {
+  const confirm = useConfirm();
+  const [mode, setMode] = useState(null); // null | 'one' | 'many'
+  const [nummer, setNummer] = useState('');
+  const [navn, setNavn] = useState('');
+  const [liste, setListe] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const nextNummer = students.reduce((m, s) => Math.max(m, Number(s.studentNumber) || 0), 0) + 1;
+  const preview = mode === 'many' ? parseElevliste(liste, nextNummer) : [];
+
+  const addOne = async (e) => {
     e.preventDefault();
-    if (!studentNumber.trim() || !studentName.trim()) return;
-
+    if (!navn.trim()) return;
     try {
-      setAdding(true);
-      await addStudent(classData.id, {
-        studentNumber: studentNumber.trim(),
-        studentName: studentName.trim()
-      });
-      setStudentNumber('');
-      setStudentName('');
-      setShowAddStudent(false);
-      onStudentAdded();
+      setSaving(true);
+      await addStudent(cls.id, { studentNumber: (nummer.trim() || String(nextNummer)), studentName: navn.trim() });
+      setNummer('');
+      setNavn('');
+      await reload();
     } catch (err) {
-      alert(`Fejl ved tilføjelse af elev: ${err.message}`);
+      toast.error(`Eleven kunne ikke tilføjes: ${err.message}`);
     } finally {
-      setAdding(false);
+      setSaving(false);
     }
   };
 
-  /**
-   * Handle student deletion
-   */
-  const handleDeleteStudent = async (studentId, studentName) => {
-    const confirmed = window.confirm(
-      `Er du sikker på at du vil slette eleven "${studentName}"?`
-    );
-
-    if (!confirmed) return;
-
+  const addMany = async (e) => {
+    e.preventDefault();
+    if (preview.length === 0) return;
     try {
-      await deleteStudent(classData.id, studentId);
-      onStudentDeleted();
+      setSaving(true);
+      for (const elev of preview) {
+        await addStudent(cls.id, elev);
+      }
+      toast.success(`${preview.length} elever er tilføjet`);
+      setListe('');
+      setMode(null);
+      await reload();
     } catch (err) {
-      alert(`Fejl ved sletning af elev: ${err.message}`);
+      toast.error(`Ikke alle elever kunne tilføjes: ${err.message}`);
+      await reload();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (student) => {
+    const ok = await confirm({
+      title: `Fjern ${student.studentName}?`,
+      message: 'Eleven fjernes fra klassen. Besvarelser og karakterer på prøver bliver ikke slettet.',
+      confirmLabel: 'Fjern elev',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await deleteStudent(cls.id, student.id);
+      await reload();
+    } catch (err) {
+      toast.error(`Eleven kunne ikke fjernes: ${err.message}`);
     }
   };
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
-      {/* Class Header */}
-      <div className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 cursor-pointer">
-        <div className="flex items-center gap-4 flex-1" onClick={onToggle}>
-          <div className="flex items-center gap-2">
-            <svg
-              className={`w-5 h-5 text-gray-500 transition-transform ${
-                isExpanded ? 'rotate-90' : ''
-              }`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-            <h3 className="text-lg font-bold text-gray-800">
-              {classData.className}
-            </h3>
-          </div>
-          <span className="text-sm text-gray-600">
-            {classData.studentCount || 0} elever
-          </span>
+    <section className="surface" aria-labelledby="class-title">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-5 pt-5">
+        <div>
+          <h2 id="class-title" className="text-[20px] font-semibold">{cls.className}</h2>
+          <p className="text-sm text-ink-soft">{students.length} {students.length === 1 ? 'elev' : 'elever'}</p>
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
-          title="Slet klasse"
-        >
-          <Trash2 />
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary" onClick={() => setMode(mode === 'one' ? null : 'one')} aria-expanded={mode === 'one'}>
+            <Plus className="w-4 h-4" /> Tilføj elev
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => setMode(mode === 'many' ? null : 'many')} aria-expanded={mode === 'many'}>
+            <Users className="w-4 h-4" /> Indsæt elevliste
+          </button>
+          <button type="button" className="btn-icon" onClick={onDeleteClass} aria-label={`Slet klassen ${cls.className}`} title="Slet klasse">
+            <Trash2 />
+          </button>
+        </div>
       </div>
 
-      {/* Expanded Content - Students */}
-      {isExpanded && (
-        <div className="p-4 border-t border-gray-200">
-          {/* Add Student Button */}
-          <div className="mb-4">
-            <button
-              onClick={() => setShowAddStudent(!showAddStudent)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors"
-            >
-              {showAddStudent ? 'Annuller' : '+ Tilføj elev'}
-            </button>
+      {mode === 'one' && (
+        <form onSubmit={addOne} className="mx-5 mt-4 p-4 rounded-control bg-paper flex flex-col sm:flex-row gap-2 sm:items-end">
+          <div className="sm:w-28">
+            <label htmlFor="elev-nr" className="field-label">Nummer</label>
+            <input id="elev-nr" className="input num" inputMode="numeric" value={nummer} onChange={(e) => setNummer(e.target.value)} placeholder={String(nextNummer)} />
           </div>
-
-          {/* Add Student Form */}
-          {showAddStudent && (
-            <form onSubmit={handleAddStudent} className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <input
-                  type="text"
-                  value={studentNumber}
-                  onChange={(e) => setStudentNumber(e.target.value)}
-                  placeholder="Elevnummer"
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                  autoFocus
-                />
-                <input
-                  type="text"
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  placeholder="Elevnavn"
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={adding || !studentNumber.trim() || !studentName.trim()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2"
-              >
-                {adding ? <Loader2 /> : 'Tilføj elev'}
-              </button>
-            </form>
-          )}
-
-          {/* Loading Students */}
-          {loadingStudents && (
-            <div className="text-center py-8">
-              <Loader2 />
-              <p className="text-gray-600 text-sm mt-2">Indlæser elever...</p>
-            </div>
-          )}
-
-          {/* Students List */}
-          {!loadingStudents && students.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <p className="text-sm">Ingen elever i denne klasse endnu</p>
-            </div>
-          )}
-
-          {!loadingStudents && students.length > 0 && (
-            <div className="space-y-2">
-              {students.map((student) => (
-                <div
-                  key={student.id}
-                  className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-3 py-1 rounded">
-                      {student.studentNumber}
-                    </span>
-                    <span className="text-sm text-gray-800">{student.studentName}</span>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteStudent(student.id, student.studentName)}
-                    className="p-1.5 hover:bg-red-50 text-red-600 rounded transition-colors"
-                    title="Slet elev"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+          <div className="flex-1">
+            <label htmlFor="elev-navn" className="field-label">Navn</label>
+            <input id="elev-navn" className="input" value={navn} onChange={(e) => setNavn(e.target.value)} placeholder="Fornavn Efternavn" autoFocus />
+          </div>
+          <button type="submit" className="btn-primary" disabled={saving || !navn.trim()}>
+            {saving && <Loader2 />} Tilføj
+          </button>
+        </form>
       )}
-    </div>
+
+      {mode === 'many' && (
+        <form onSubmit={addMany} className="mx-5 mt-4 p-4 rounded-control bg-paper">
+          <label htmlFor="elevliste" className="field-label">Elevliste</label>
+          <textarea
+            id="elevliste"
+            className="input h-36 py-2 resize-y"
+            value={liste}
+            onChange={(e) => setListe(e.target.value)}
+            placeholder={'Én elev pr. linje, fx\n1 Anna Jensen\n2 Bo Nielsen'}
+            autoFocus
+          />
+          <p className="field-hint">Kopiér gerne direkte fra et regneark. Linjer uden nummer nummereres fra {nextNummer}.</p>
+          <div className="mt-3 flex gap-2">
+            <button type="submit" className="btn-primary" disabled={saving || preview.length === 0}>
+              {saving && <Loader2 />} Tilføj {preview.length || ''} {preview.length === 1 ? 'elev' : 'elever'}
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setMode(null)}>Annuller</button>
+          </div>
+        </form>
+      )}
+
+      <div className="p-5">
+        {loading ? (
+          <Spinner label="Indlæser elever…" />
+        ) : students.length === 0 ? (
+          <p className="text-ink-soft py-6 text-center">Ingen elever endnu. Tilføj dem én ad gangen eller indsæt hele listen.</p>
+        ) : (
+          <ul className="divide-y divide-line border border-line rounded-control">
+            {students.map(s => (
+              <li key={s.id} className="group flex items-center gap-3 px-3 py-2">
+                <span className="num w-8 text-right text-sm text-ink-soft">{s.studentNumber}</span>
+                <span className="flex-1 text-sm">{s.studentName}</span>
+                <button
+                  type="button"
+                  className="btn-icon md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+                  onClick={() => remove(s)}
+                  aria-label={`Fjern ${s.studentName}`}
+                  title="Fjern elev"
+                >
+                  <X />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }

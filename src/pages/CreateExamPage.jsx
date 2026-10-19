@@ -1,619 +1,232 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { Link, useNavigate } from 'react-router-dom';
 import { useExams } from '../hooks/useExams.js';
 import { useClasses } from '../hooks/useClasses.js';
 import { Layout } from '../components/Layout.jsx';
-import { Loader2, AlertCircle, CheckCircle } from '../components/Icons.jsx';
+import { ArrowLeft, Loader2 } from '../components/Icons.jsx';
+import { FileField, Notice } from '../components/ui.jsx';
 import { uploadExamFile } from '../services/storageService.js';
 import { updateExamFileRef } from '../services/firestoreService.js';
 
+const FAG = ['Matematik', 'Dansk'];
+const ANDEN_KLASSE = '__anden__';
+
 /**
- * CreateExamPage - Form for creating a new exam
+ * Opret prøve. Materialet kan tilføjes nu eller senere.
  */
 export function CreateExamPage() {
   const navigate = useNavigate();
   const { createExam } = useExams();
   const { classes, loading: loadingClasses } = useClasses();
 
-  const [formData, setFormData] = useState({
-    beskrivelse: '',
-    dato: '',
-    klasse: '',
-    type: 'Matematik',
-    enableVision: false
-  });
-  
-  const [useCustomClass, setUseCustomClass] = useState(false);
+  const [formData, setFormData] = useState({ beskrivelse: '', dato: '', klasse: '', type: 'Matematik', enableVision: false });
   const [customClassName, setCustomClassName] = useState('');
-
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  const [files, setFiles] = useState({ rettevejledning: null, omsætningstabel: null, bedoemmelseskema: null });
 
-  // File upload states
-  const [rettevejledningFile, setRettevejledningFile] = useState(null);
-  const [omsætningstabelFile, setOmsætningstabelFile] = useState(null);
-  const [bedoemmelseskemaFile, setBedoemmelseskemaFile] = useState(null);
-  const [uploadingRettevejledning, setUploadingRettevejledning] = useState(false);
-  const [uploadingOmsætningstabel, setUploadingOmsætningstabel] = useState(false);
-  const [uploadingBedoemmelseskema, setUploadingBedoemmelseskema] = useState(false);
-  const [uploadedRettevejledning, setUploadedRettevejledning] = useState(null);
-  const [uploadedOmsætningstabel, setUploadedOmsætningstabel] = useState(null);
-  const [uploadedBedoemmelseskema, setUploadedBedoemmelseskema] = useState(null);
+  const useCustomClass = formData.klasse === ANDEN_KLASSE || (!loadingClasses && classes.length === 0);
 
-  /**
-   * Handle input change
-   */
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value
-    }));
-
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: null
-      }));
-    }
+  const set = (name, value) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: null }));
   };
 
-  /**
-   * Handle file selection
-   */
-  const handleFileChange = (e, fileType) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (fileType === 'rettevejledning') {
-        setRettevejledningFile(file);
-      } else if (fileType === 'omsætningstabel') {
-        setOmsætningstabelFile(file);
-      } else if (fileType === 'bedoemmelseskema') {
-        setBedoemmelseskemaFile(file);
-      }
-    }
-  };
-
-  /**
-   * Upload a file for newly created exam
-   */
-  const handleFileUpload = async (examId, fileType) => {
-    let file, setUploading, setUploaded, fileRefField;
-    
-    if (fileType === 'rettevejledning') {
-      file = rettevejledningFile;
-      setUploading = setUploadingRettevejledning;
-      setUploaded = setUploadedRettevejledning;
-      fileRefField = 'rettevejledningRef';
-    } else if (fileType === 'omsætningstabel') {
-      file = omsætningstabelFile;
-      setUploading = setUploadingOmsætningstabel;
-      setUploaded = setUploadedOmsætningstabel;
-      fileRefField = 'omsætningstabelRef';
-    } else if (fileType === 'bedoemmelseskema') {
-      file = bedoemmelseskemaFile;
-      setUploading = setUploadingBedoemmelseskema;
-      setUploaded = setUploadedBedoemmelseskema;
-      fileRefField = 'bedoemmelseskemaRef';
-    }
-    
-    if (!file || !examId) return;
-    
-    try {
-      setUploading(true);
-      
-      console.log(`📤 Uploading ${fileType} for new exam ${examId}`);
-      
-      // Upload file to storage
-      const uploadResult = await uploadExamFile(examId, file, fileType);
-      console.log('✅ Upload result:', uploadResult);
-      
-      // Update Firestore with file reference
-      await updateExamFileRef(examId, fileRefField, uploadResult);
-      console.log(`✅ Firestore updated with ${fileRefField}`);
-      
-      setUploaded(uploadResult);
-      
-      console.log(`🎉 ${fileType} uploaded successfully!`);
-    } catch (err) {
-      console.error(`❌ Error uploading ${fileType}:`, err);
-      alert(`Fejl ved upload af ${fileType}: ${err.message}`);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  /**
-   * Validate form
-   */
   const validate = () => {
-    const newErrors = {};
-
-    if (!formData.beskrivelse.trim()) {
-      newErrors.beskrivelse = 'Beskrivelse er påkrævet';
-    }
-
-    if (!formData.dato) {
-      newErrors.dato = 'Dato er påkrævet';
-    }
-
-    // Check if using custom class or selected class
-    const selectedClass = useCustomClass ? customClassName : formData.klasse;
-    if (!selectedClass || !selectedClass.trim()) {
-      newErrors.klasse = 'Klasse er påkrævet';
-    }
-
-    if (!formData.type) {
-      newErrors.type = 'Type er påkrævet';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const e = {};
+    if (!formData.beskrivelse.trim()) e.beskrivelse = 'Giv prøven en titel';
+    if (!formData.dato) e.dato = 'Vælg prøvens dato';
+    const klasse = useCustomClass ? customClassName : formData.klasse;
+    if (!klasse || !klasse.trim()) e.klasse = 'Vælg klassen';
+    setErrors(e);
+    // Flyt fokus til første felt med fejl
+    const first = ['beskrivelse', 'klasse', 'dato'].find(k => e[k]);
+    if (first) document.getElementById(first === 'klasse' && useCustomClass && classes.length > 0 ? 'klasse-custom' : first)?.focus();
+    return Object.keys(e).length === 0;
   };
 
-  /**
-   * Handle form submission
-   */
+  const uploadOne = async (examId, fileType, refField) => {
+    const file = files[fileType];
+    if (!file) return true;
+    try {
+      const result = await uploadExamFile(examId, file, fileType);
+      await updateExamFileRef(examId, refField, result);
+      return true;
+    } catch (err) {
+      toast.error(`${file.name} kunne ikke uploades: ${err.message}`);
+      return false;
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
-
-    if (!validate()) {
-      return;
-    }
+    if (!validate()) return;
 
     try {
       setSubmitting(true);
+      const klasse = useCustomClass ? customClassName.trim() : formData.klasse;
+      const examId = await createExam({ ...formData, enableVision: formData.type === 'Matematik' && formData.enableVision, klasse, dato: new Date(formData.dato) });
 
-      // Use custom class name if selected, otherwise use selected class
-      const className = useCustomClass ? customClassName.trim() : formData.klasse;
-
-      // Convert date string to Date object
-      const examData = {
-        ...formData,
-        klasse: className,
-        dato: new Date(formData.dato)
-      };
-
-      const examId = await createExam(examData);
-      console.log('✅ Exam created with ID:', examId);
-      
-      // Upload files based on exam type
       if (formData.type === 'Matematik') {
-        // Matematik: Upload rettevejledning + omsætningstabel
-        if (rettevejledningFile) {
-          console.log('📤 Uploading rettevejledning...');
-          await handleFileUpload(examId, 'rettevejledning');
-        }
-        
-        if (omsætningstabelFile) {
-          console.log('📤 Uploading omsætningstabel...');
-          await handleFileUpload(examId, 'omsætningstabel');
-        }
-      } else if (formData.type === 'Dansk') {
-        // Dansk: Upload KUN bedømmelseskema
-        if (bedoemmelseskemaFile) {
-          console.log('📤 Uploading bedømmelseskema...');
-          await handleFileUpload(examId, 'bedoemmelseskema');
-        }
+        await uploadOne(examId, 'rettevejledning', 'rettevejledningRef');
+        await uploadOne(examId, 'omsætningstabel', 'omsætningstabelRef');
+      } else {
+        await uploadOne(examId, 'bedoemmelseskema', 'bedoemmelseskemaRef');
       }
-      
-      // Navigate back to home page
-      navigate('/');
+
+      toast.success('Prøven er oprettet');
+      // Fortsæt på prøvens første trin, hvor materialet kan tjekkes
+      navigate(`/exams/${examId}/edit`);
     } catch (err) {
-      console.error('Error creating exam:', err);
-      setSubmitError(err.message || 'Kunne ikke oprette prøve');
+      setSubmitError(err.message || 'Prøven kunne ikke oprettes');
       setSubmitting(false);
     }
   };
 
   return (
-    <Layout>
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">
-            Opret ny prøve
-          </h2>
+    <Layout width="narrow">
+      <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-ink-soft hover:text-ink mb-4">
+        <ArrowLeft className="w-4 h-4" /> Alle prøver
+      </Link>
+      <h1 className="text-[26px] leading-tight font-semibold">Ny prøve</h1>
+      <p className="mt-1 text-ink-soft mb-6">Du kan tilføje materialet nu eller senere.</p>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Beskrivelse */}
+      <form onSubmit={handleSubmit} noValidate className="space-y-6">
+        <section className="surface p-5 space-y-5">
+          <div>
+            <label htmlFor="beskrivelse" className="field-label">Titel</label>
+            <input
+              id="beskrivelse"
+              className={`input ${errors.beskrivelse ? 'input-invalid' : ''}`}
+              value={formData.beskrivelse}
+              onChange={(e) => set('beskrivelse', e.target.value)}
+              placeholder="Fx FP9 Matematik maj 2026"
+              aria-invalid={Boolean(errors.beskrivelse)}
+              aria-describedby={errors.beskrivelse ? 'beskrivelse-error' : undefined}
+            />
+            {errors.beskrivelse && <p id="beskrivelse-error" className="field-error">{errors.beskrivelse}</p>}
+          </div>
+
+          <fieldset>
+            <legend className="field-label">Fag</legend>
+            <div className="inline-flex p-1 rounded-control bg-paper border border-line" role="radiogroup">
+              {FAG.map(fag => (
+                <label key={fag} className={`cursor-pointer px-4 h-8 inline-flex items-center rounded-[5px] text-sm font-semibold transition-colors ${formData.type === fag ? 'bg-surface text-ink shadow-sm border border-line' : 'text-ink-soft hover:text-ink border border-transparent'}`}>
+                  <input type="radio" name="type" value={fag} checked={formData.type === fag} onChange={() => set('type', fag)} className="sr-only" />
+                  {fag}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="grid gap-5 sm:grid-cols-2">
             <div>
-              <label
-                htmlFor="beskrivelse"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Beskrivelse <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                id="beskrivelse"
-                name="beskrivelse"
-                value={formData.beskrivelse}
-                onChange={handleChange}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.beskrivelse
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
-                }`}
-                placeholder="f.eks. FP10 Matematik Efterår 2024"
-              />
-              {errors.beskrivelse && (
-                <p className="mt-1 text-sm text-red-600">{errors.beskrivelse}</p>
+              <label htmlFor="klasse" className="field-label">Klasse</label>
+              {!loadingClasses && classes.length > 0 && (
+                <select
+                  id="klasse"
+                  className={`input ${errors.klasse && !useCustomClass ? 'input-invalid' : ''}`}
+                  value={formData.klasse}
+                  onChange={(e) => set('klasse', e.target.value)}
+                >
+                  <option value="">Vælg klasse</option>
+                  {classes.map(c => <option key={c.id} value={c.className}>{c.className} ({c.studentCount || 0} elever)</option>)}
+                  <option value={ANDEN_KLASSE}>Anden klasse…</option>
+                </select>
+              )}
+              {useCustomClass && (
+                <input
+                  id={classes.length > 0 ? 'klasse-custom' : 'klasse'}
+                  className={`input ${classes.length > 0 ? 'mt-2' : ''} ${errors.klasse ? 'input-invalid' : ''}`}
+                  value={customClassName}
+                  onChange={(e) => { setCustomClassName(e.target.value); if (errors.klasse) setErrors(p => ({ ...p, klasse: null })); }}
+                  placeholder="Klassens navn"
+                  aria-label="Klassens navn"
+                />
+              )}
+              {errors.klasse && <p className="field-error">{errors.klasse}</p>}
+              {useCustomClass && (
+                <p className="field-hint">Opret klassen under <Link to="/klasser" className="underline underline-offset-2">Klasser</Link> for at kunne uploade besvarelser pr. elev.</p>
               )}
             </div>
-
-            {/* Dato */}
             <div>
-              <label
-                htmlFor="dato"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Dato <span className="text-red-500">*</span>
-              </label>
+              <label htmlFor="dato" className="field-label">Dato</label>
               <input
-                type="date"
                 id="dato"
-                name="dato"
+                type="date"
+                className={`input ${errors.dato ? 'input-invalid' : ''}`}
                 value={formData.dato}
-                onChange={handleChange}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.dato
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
-                }`}
+                onChange={(e) => set('dato', e.target.value)}
+                aria-invalid={Boolean(errors.dato)}
               />
-              {errors.dato && (
-                <p className="mt-1 text-sm text-red-600">{errors.dato}</p>
-              )}
+              {errors.dato && <p className="field-error">{errors.dato}</p>}
             </div>
+          </div>
 
-            {/* Klasse */}
-            <div>
-              <label
-                htmlFor="klasse"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Klasse <span className="text-red-500">*</span>
-              </label>
-              
-              {loadingClasses ? (
-                <div className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50">
-                  <Loader2 />
-                  <span className="text-gray-600 text-sm">Indlæser klasser...</span>
-                </div>
-              ) : (
-                <>
-                  {!useCustomClass && classes.length > 0 ? (
-                    <div className="space-y-2">
-                      <select
-                        id="klasse"
-                        name="klasse"
-                        value={formData.klasse}
-                        onChange={handleChange}
-                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                          errors.klasse
-                            ? 'border-red-300 bg-red-50'
-                            : 'border-gray-300'
-                        }`}
-                      >
-                        <option value="">Vælg en klasse...</option>
-                        {classes.map((cls) => (
-                          <option key={cls.id} value={cls.className}>
-                            {cls.className}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => setUseCustomClass(true)}
-                        className="text-sm text-indigo-600 hover:text-indigo-700"
-                      >
-                        Eller indtast et andet klassenavn
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        id="customKlasse"
-                        value={customClassName}
-                        onChange={(e) => {
-                          setCustomClassName(e.target.value);
-                          // Clear error when typing
-                          if (errors.klasse) {
-                            setErrors((prev) => ({ ...prev, klasse: null }));
-                          }
-                        }}
-                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                          errors.klasse
-                            ? 'border-red-300 bg-red-50'
-                            : 'border-gray-300'
-                        }`}
-                        placeholder="f.eks. 9A"
-                      />
-                      {classes.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUseCustomClass(false);
-                            setCustomClassName('');
-                          }}
-                          className="text-sm text-indigo-600 hover:text-indigo-700"
-                        >
-                          Eller vælg fra eksisterende klasser
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-              
-              {errors.klasse && (
-                <p className="mt-1 text-sm text-red-600">{errors.klasse}</p>
-              )}
-            </div>
+          {formData.type === 'Matematik' && (
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.enableVision}
+                onChange={(e) => set('enableVision', e.target.checked)}
+                className="mt-1 w-4 h-4 accent-[#1E2B3A]"
+              />
+              <span>
+                <span className="block text-sm font-semibold">Læs tegninger og grafer</span>
+                <span className="block text-[13px] text-ink-soft">AI ser PDF-siderne som billeder. Mere præcist ved opgaver med tegninger, men 3–5 gange dyrere og langsommere.</span>
+              </span>
+            </label>
+          )}
+        </section>
 
-            {/* Type */}
-            <div>
-              <label
-                htmlFor="type"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Type <span className="text-red-500">*</span>
-              </label>
-              <select
-                id="type"
-                name="type"
-                value={formData.type}
-                onChange={handleChange}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.type
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
-                }`}
-              >
-                <option value="Matematik">Matematik</option>
-                <option value="Dansk">Dansk</option>
-              </select>
-              {errors.type && (
-                <p className="mt-1 text-sm text-red-600">{errors.type}</p>
-              )}
-              {formData.type === 'Dansk' && (
-                <p className="mt-2 text-sm text-blue-600 bg-blue-50 p-2 rounded border border-blue-200">
-                  ℹ️ Dansk prøver bruger bedømmelseskema i stedet for rettevejledning
-                </p>
-              )}
-            </div>
+        <section className="surface p-5 space-y-5">
+          <div>
+            <h2 className="text-[17px] font-semibold">Materiale</h2>
+            <p className="text-sm text-ink-soft mt-0.5">Valgfrit nu. Uden materiale kan prøven ikke rettes.</p>
+          </div>
+          {formData.type === 'Matematik' ? (
+            <>
+              <FileField
+                id="rettevejledning"
+                label="Rettevejledning"
+                hint="PDF eller Word"
+                accept=".pdf,.docx,.txt"
+                selected={files.rettevejledning}
+                onSelect={(f) => setFiles(p => ({ ...p, rettevejledning: f }))}
+              />
+              <FileField
+                id="omsaetningstabel"
+                label="Omsætningstabel"
+                hint="PDF eller Word. Du kan tjekke og rette tabellen bagefter."
+                accept=".pdf,.docx,.txt"
+                selected={files.omsætningstabel}
+                onSelect={(f) => setFiles(p => ({ ...p, omsætningstabel: f }))}
+              />
+            </>
+          ) : (
+            <FileField
+              id="bedoemmelseskema"
+              label="Bedømmelseskema"
+              hint="PDF eller Word med kriterier og vægte"
+              accept=".pdf,.docx,.txt"
+              selected={files.bedoemmelseskema}
+              onSelect={(f) => setFiles(p => ({ ...p, bedoemmelseskema: f }))}
+            />
+          )}
+        </section>
 
-            {/* Vision API Toggle - Only for Matematik */}
-            {formData.type === 'Matematik' && (
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    id="enableVision"
-                    name="enableVision"
-                    checked={formData.enableVision}
-                    onChange={(e) => setFormData(prev => ({ ...prev, enableVision: e.target.checked }))}
-                    className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                  />
-                  <div className="flex-1">
-                    <label htmlFor="enableVision" className="block text-sm font-semibold text-purple-900 cursor-pointer">
-                      🔍 Aktiver Vision API (BETA) - AI kan se billeder/tegninger i PDF'er
-                    </label>
-                    <p className="text-xs text-purple-700 mt-1">
-                      Med Vision API kan AI'en se og analysere tegninger, diagrammer og grafer i elevernes besvarelser.
-                      Dette giver mere præcis retning af opgaver med visuelle elementer.
-                    </p>
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-white rounded p-2 border border-purple-200">
-                        <p className="font-semibold text-green-700">✅ Fordele:</p>
-                        <ul className="mt-1 space-y-0.5 text-purple-800">
-                          <li>• Ser tegninger i opgaver</li>
-                          <li>• Analyserer diagrammer</li>
-                          <li>• Mere præcis retning</li>
-                        </ul>
-                      </div>
-                      <div className="bg-white rounded p-2 border border-purple-200">
-                        <p className="font-semibold text-orange-700">⚠️ Overvej:</p>
-                        <ul className="mt-1 space-y-0.5 text-purple-800">
-                          <li>• 3-5x dyrere pr. retning</li>
-                          <li>• Langsommere retning</li>
-                          <li>• Kun for PDF filer</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+        {submitError && <Notice title="Prøven kunne ikke oprettes">{submitError}</Notice>}
 
-            {/* File Uploads Section - Conditional based on exam type */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Upload filer (valgfrit)</h3>
-              
-              {formData.type === 'Matematik' ? (
-                <>
-                  {/* MATEMATIK: Rettevejledning Upload */}
-                  <div className="mb-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Rettevejledning
-                      </label>
-                      {rettevejledningFile && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="w-5 h-5" />
-                          <span className="text-xs font-medium">Valgt</span>
-                        </div>
-                      )}
-                    </div>
-                    {rettevejledningFile && (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              {rettevejledningFile.name}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setRettevejledningFile(null)}
-                            className="text-xs text-red-600 hover:text-red-700"
-                          >
-                            Fjern
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      accept=".pdf,.doc,.docx"
-                      onChange={(e) => handleFileChange(e, 'rettevejledning')}
-                      className="w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Accepterer PDF, Word dokumenter (.doc, .docx)
-                    </p>
-                  </div>
-
-                  {/* MATEMATIK: Omsætningstabel Upload */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Omsætningstabel
-                      </label>
-                      {omsætningstabelFile && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="w-5 h-5" />
-                          <span className="text-xs font-medium">Valgt</span>
-                        </div>
-                      )}
-                    </div>
-                    {omsætningstabelFile && (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              {omsætningstabelFile.name}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setOmsætningstabelFile(null)}
-                            className="text-xs text-red-600 hover:text-red-700"
-                          >
-                            Fjern
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      accept=".pdf,.doc,.docx,.xlsx,.xls"
-                      onChange={(e) => handleFileChange(e, 'omsætningstabel')}
-                      className="w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Accepterer PDF, Word dokumenter (.doc, .docx), Excel filer (.xlsx, .xls)
-                    </p>
-                  </div>
-                </>
-              ) : formData.type === 'Dansk' ? (
-                <>
-                  {/* DANSK: Bedømmelseskema Upload */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Bedømmelseskema
-                      </label>
-                      {bedoemmelseskemaFile && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="w-5 h-5" />
-                          <span className="text-xs font-medium">Valgt</span>
-                        </div>
-                      )}
-                    </div>
-                    {bedoemmelseskemaFile && (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              {bedoemmelseskemaFile.name}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setBedoemmelseskemaFile(null)}
-                            className="text-xs text-red-600 hover:text-red-700"
-                          >
-                            Fjern
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      accept=".pdf,.doc,.docx"
-                      onChange={(e) => handleFileChange(e, 'bedoemmelseskema')}
-                      className="w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Accepterer PDF, Word dokumenter (.doc, .docx)
-                    </p>
-                    <p className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-200">
-                      ℹ️ Bedømmelseskemaet skal indeholde alle kriterier med vægte og beskrivelser
-                    </p>
-                  </div>
-                </>
-              ) : null}
-            </div>
-
-            {/* Submit Error */}
-            {submitError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <AlertCircle />
-                  <div>
-                    <p className="font-semibold text-red-800">Fejl</p>
-                    <p className="text-red-700 text-sm">{submitError}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Buttons */}
-            <div className="flex gap-4 pt-4">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 />
-                    Opretter...
-                  </>
-                ) : (
-                  'Opret prøve'
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                disabled={submitting}
-                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 font-semibold rounded-lg transition-colors"
-              >
-                Annuller
-              </button>
-            </div>
-          </form>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+          <Link to="/" className="btn-ghost">Annuller</Link>
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {submitting && <Loader2 />} {submitting ? 'Opretter…' : 'Opret prøve'}
+          </button>
         </div>
-      </div>
+      </form>
     </Layout>
   );
 }
