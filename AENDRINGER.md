@@ -158,3 +158,15 @@ Koden er gendannet fra source map'en i deploy-zip'en. Den nye kode er bygget med
   - hensyn til alderstrin
 - **Usikkerhed:** AI markerer opgaver og kriterier, hvor den er i tvivl, med en begrundelse. Det vises som "Tjek" i retningen og som "Tjek advarsel" i elevlisten.
 - **Feedback:** Feedback pr. opgave er nu skrevet til læreren (hvorfor dette pointtal). Den samlede feedback er skrevet til eleven.
+
+## Baggrundsretning (runde 4)
+
+Den ræsonnerende model gav 504-fejl, fordi en synkron Netlify-funktion ikke må køre længe nok. Derfor kører retningen nu som **baggrundsjob**:
+
+1. `grade-start` validerer opgaven, gemmer den midlertidigt i **Netlify Blobs** og starter baggrundsfunktionen. Den svarer straks med et job-id.
+2. `grade-run-background` kalder AI og må køre i op til 15 minutter. Elevteksten slettes, så snart AI-kaldet er færdigt.
+3. `grade-status` er den funktion, browseren spørger med 2,5 sekunders mellemrum. Resultatet udleveres én gang og slettes derefter.
+
+Retningen bruger `gpt-6.1-sol` med `reasoning_effort: medium`, fordi korrekthed er vigtigere end hastighed. Det kan justeres med `OPENAI_REASONING_EFFORT`. Fælles AI-kode ligger i `netlify/lib/aiCore.js`, og `grade-exam` findes stadig som synkron reserve.
+
+Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx fordi siden blev lukket, ryddes det op efter 16 minutter, når statussen tjekkes.

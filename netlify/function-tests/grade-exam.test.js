@@ -50,7 +50,7 @@ describe('grade-exam', () => {
     expect(res.statusCode).toBe(200);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(sent.model).toBe('gpt-6.1-sol');
-    expect(sent.reasoning_effort).toBe('low');
+    expect(sent.reasoning_effort).toBe('medium');
     expect(sent.max_completion_tokens).toBeGreaterThan(10000);
     expect(sent.temperature).toBeUndefined();
     expect(sent.max_tokens).toBeUndefined();

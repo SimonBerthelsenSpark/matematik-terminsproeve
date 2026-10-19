@@ -65,7 +65,7 @@ export async function parseDanskBedoemmelse(file) {
  */
 async function parseWithAI(text) {
   // Prompt og JSON-skema ligger på serveren (netlify/functions/grade-exam.js)
-  const { result: parsed } = await callAI('parseBedoemmelse', { tekst: text }, { timeoutMs: 45000 });
+  const { result: parsed } = await callAI('parseBedoemmelse', { tekst: text });
 
   if (!parsed?.dele || !Array.isArray(parsed.dele)) {
     throw new Error('Invalid structure from AI');

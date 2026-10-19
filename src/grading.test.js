@@ -128,24 +128,32 @@ describe('aiService', () => {
 
   it('beregner pris', () => {
     expect(calculateCost({ prompt_tokens: 1e6, completion_tokens: 1e6 }, 'gpt-4o-2024-08-06')).toBe(12.5);
+    expect(calculateCost({ prompt_tokens: 1e6, completion_tokens: 1e6 }, 'gpt-6.1-sol')).toBe(12);
   });
 
-  it('prøver igen ved 502 og lykkes', async () => {
+  it('kører et baggrundsjob og prøver igen ved 502', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()
+      // 1. forsøg: start fejler med 502
       .mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({ success: false, error: 'AI-tjenesten svarede 500' }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, result: { x: 1 }, usage: null, model: 'gpt-4o' }) });
+      // 2. forsøg: start OK, første poll kører stadig, anden poll færdig
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ success: true, jobId: 'abc' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ state: 'running' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ state: 'done', response: { success: true, result: { x: 1 }, usage: null, model: 'gpt-6.1-sol' } }) });
     vi.stubGlobal('fetch', fetchMock);
 
     const onRetry = vi.fn();
-    const promise = callAI('ping', {}, { onRetry });
+    const onProgress = vi.fn();
+    const promise = callAI('ping', {}, { onRetry, onProgress });
     await vi.runAllTimersAsync();
     const res = await promise;
 
     expect(res.result).toEqual({ x: 1 });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.model).toBe('gpt-6.1-sol');
     expect(onRetry).toHaveBeenCalledOnce();
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ task: 'ping', payload: {} });
+    expect(onProgress).toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ task: 'ping', payload: {} });
+    expect(fetchMock.mock.calls[2][0]).toContain('grade-status?id=abc');
     vi.useRealTimers();
   });
 

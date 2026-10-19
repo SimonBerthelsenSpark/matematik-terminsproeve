@@ -96,7 +96,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         setConnectionTestResult(null);
         setError(null);
         try {
-            const { model } = await callAI('ping', {}, { maxRetries: 0, timeoutMs: 20000 });
+            const { model } = await callAI('ping', {}, { maxRetries: 0 });
             setConnectionTestResult({ success: true, message: 'Forbindelse succesfuld!', provider: 'OpenAI', model });
         } catch (err) {
             setConnectionTestResult({ success: false, message: err.message });
@@ -140,7 +140,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
             'gradeMath',
             { rettevejledning, elevbesvarelse: anonymTekst, pdfImages },
             {
-                timeoutMs: pdfImages.length ? 65000 : 45000,
+                onProgress: (sek) => setCurrentTaskPhase(`AI gennemgår besvarelsen grundigt… ${sek} sek.`),
                 onRetry: (info) => setRetryInfo({ ...info, elevNavn }),
                 onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)
             }
