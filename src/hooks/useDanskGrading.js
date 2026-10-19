@@ -53,7 +53,7 @@ export async function bedoemDanskOpgave(parsedBedoemmelse, elevbesvarelse, elevN
 
   try {
     const { result: aiResult, usage, model, cost } = await callAI('gradeDansk', payload, {
-      timeoutMs: 50000,
+      onProgress: (sek) => onProgress?.(`AI bedømmer teksten grundigt… ${sek} sek.`),
       onRetry: ({ attempt, maxRetries, waitSeconds }) =>
         onProgress?.(`AI optaget – nyt forsøg ${attempt}/${maxRetries} om ${waitSeconds} sek...`)
     });

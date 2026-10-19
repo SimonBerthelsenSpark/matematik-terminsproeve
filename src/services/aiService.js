@@ -3,7 +3,6 @@
  * Klienten sender kun en opgavetype + data. Selve prompten bygges på serveren.
  */
 
-const ENDPOINT = '/.netlify/functions/grade-exam';
 
 /**
  * Priser pr. 1M tokens (USD), kun til omkostningsvisning i UI.
@@ -39,24 +38,30 @@ export class AIError extends Error {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+const START_ENDPOINT = '/.netlify/functions/grade-start';
+const STATUS_ENDPOINT = '/.netlify/functions/grade-status';
+const POLL_MS = 2500;
+const JOB_TIMEOUT_MS = 15 * 60 * 1000;
+
 /**
- * Kald grade-exam med automatisk genforsøg ved 429, 5xx og timeouts.
+ * Kør en AI-opgave som baggrundsjob og vent på resultatet.
+ * Prøver automatisk igen ved 429, 5xx og netværksfejl.
  * @param {string} task - 'gradeMath' | 'gradeDansk' | 'parseBedoemmelse' | 'explainTask' | 'askQuestion' | 'ping'
  * @param {Object} payload
  * @param {Object} [options]
- * @param {number} [options.timeoutMs=60000]
  * @param {number} [options.maxRetries=3]
  * @param {(info: {attempt:number, maxRetries:number, waitSeconds:number, reason:string}) => void} [options.onRetry]
  * @param {(secondsLeft:number) => void} [options.onWaitTick]
+ * @param {(seconds:number) => void} [options.onProgress] - sekunder siden AI startede
  * @returns {Promise<{ result: any, usage: Object|null, model: string, cost: number }>}
  */
 export async function callAI(task, payload, options = {}) {
-  const { timeoutMs = 60000, maxRetries = 3, onRetry, onWaitTick } = options;
+  const { maxRetries = 3, onRetry, onWaitTick, onProgress } = options;
 
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await callOnce(task, payload, timeoutMs);
+      return await runJob(task, payload, onProgress);
     } catch (err) {
       lastError = err;
       if (!(err instanceof AIError) || !err.retryable || attempt === maxRetries) throw err;
@@ -76,49 +81,67 @@ export async function callAI(task, payload, options = {}) {
   throw lastError;
 }
 
-async function callOnce(task, payload, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+async function fetchJson(url, init) {
   let response;
   try {
-    response = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task, payload }),
-      signal: controller.signal
-    });
+    response = await fetch(url, init);
   } catch (err) {
-    if (err.name === 'AbortError') {
-      throw new AIError('AI svarede ikke i tide', { retryable: true });
-    }
     throw new AIError(`Netværksfejl: ${err.message}`, { retryable: true });
-  } finally {
-    clearTimeout(timer);
   }
-
   let data = null;
   try {
     data = await response.json();
   } catch {
-    // Netlify kan svare med HTML ved timeout (502/504)
+    // Netlify kan svare med HTML ved fejl
   }
+  return { response, data };
+}
 
-  if (!response.ok || !data?.success) {
-    const status = response.status;
-    const message =
-      data?.error ||
-      (status === 413 ? 'Forespørgslen er for stor (for mange/store billeder)' : `AI-fejl (${status})`);
-    const retryable = status === 429 || status === 502 || status === 503 || status === 504;
-    throw new AIError(message, { status, retryable });
+function errorFrom(status, data) {
+  const message =
+    data?.error ||
+    (status === 413 ? 'Forespørgslen er for stor (for mange/store billeder)' : `AI-fejl (${status})`);
+  const retryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  return new AIError(message, { status, retryable });
+}
+
+async function runJob(task, payload, onProgress) {
+  // 1) Start jobbet
+  const { response, data } = await fetchJson(START_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task, payload })
+  });
+  if (response.status !== 202 || !data?.jobId) throw errorFrom(response.status, data);
+
+  // 2) Vent på resultatet
+  const started = Date.now();
+  while (Date.now() - started < JOB_TIMEOUT_MS) {
+    await sleep(POLL_MS);
+    onProgress?.(Math.round((Date.now() - started) / 1000));
+
+    const { response: r, data: status } = await fetchJson(`${STATUS_ENDPOINT}?id=${encodeURIComponent(data.jobId)}`);
+    if (r.status === 404) {
+      throw new AIError('Resultatet gik tabt undervejs', { status: 404, retryable: true });
+    }
+    if (!r.ok || !status) {
+      // Midlertidig fejl i statuskaldet – prøv igen ved næste poll
+      continue;
+    }
+    if (status.state === 'done') {
+      const out = status.response || {};
+      return {
+        result: out.result,
+        usage: out.usage,
+        model: out.model,
+        cost: calculateCost(out.usage, out.model)
+      };
+    }
+    if (status.state === 'error') {
+      throw errorFrom(status.statusCode || 500, status.response);
+    }
   }
-
-  return {
-    result: data.result,
-    usage: data.usage,
-    model: data.model,
-    cost: calculateCost(data.usage, data.model)
-  };
+  throw new AIError('AI svarede ikke i tide', { status: 504, retryable: true });
 }
 
 // ==================== PSEUDONYMISERING ====================
