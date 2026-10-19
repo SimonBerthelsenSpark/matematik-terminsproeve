@@ -12,6 +12,7 @@ const CreateExamPage = lazy(() => import('./pages/CreateExamPage.jsx').then(m =>
 const EditExamPage = lazy(() => import('./pages/EditExamPage.jsx').then(m => ({ default: m.EditExamPage })));
 const StudentMatrixPage = lazy(() => import('./pages/StudentMatrixPage.jsx').then(m => ({ default: m.StudentMatrixPage })));
 const ClassesPage = lazy(() => import('./pages/ClassesPage.jsx').then(m => ({ default: m.ClassesPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx').then(m => ({ default: m.SettingsPage })));
 const ExamDetailPage = lazy(() => import('./pages/ExamDetailPage.jsx').then(m => ({ default: m.ExamDetailPage })));
 
 function PageLoader() {
@@ -48,6 +49,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
           {/* Klasser og elever */}
           <Route path="/klasser" element={<ClassesPage />} />
+
+          {/* Indstillinger (slet alle data) */}
+          <Route path="/indstillinger" element={<SettingsPage />} />
 
           {/* Create New Exam */}
           <Route path="/exams/new" element={<CreateExamPage />} />

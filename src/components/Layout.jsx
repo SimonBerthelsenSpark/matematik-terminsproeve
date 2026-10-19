@@ -15,14 +15,15 @@ export function Layout({ children, width = 'wide' }) {
     <div className="min-h-screen bg-paper">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 btn-secondary">Gå til indhold</a>
       <header className="bg-surface border-b border-line">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center gap-8">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center gap-5 sm:gap-8">
           <Link to="/" className="flex items-center gap-2.5 h-14 shrink-0" aria-label="AI Prøveretter – forside">
             <Logo />
-            <span className="font-semibold text-[16px] tracking-[-0.01em]">AI Prøveretter</span>
+            <span className="hidden sm:inline font-semibold text-[16px] tracking-[-0.01em]">AI Prøveretter</span>
           </Link>
-          <nav className="flex gap-6" aria-label="Hovedmenu">
+          <nav className="flex gap-4 sm:gap-6" aria-label="Hovedmenu">
             <NavLink to="/" end className={navClass}>Prøver</NavLink>
             <NavLink to="/klasser" className={navClass}>Klasser</NavLink>
+            <NavLink to="/indstillinger" className={navClass}>Indstillinger</NavLink>
           </nav>
         </div>
       </header>
