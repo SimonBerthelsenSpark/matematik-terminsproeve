@@ -24,7 +24,7 @@ export function GradingProgress({ statusMessage, currentTaskPhase = '', complete
           ? `AI er travl – prøver igen om lidt (forsøg ${retryInfo.attempt} af ${retryInfo.maxRetries}).`
           : (currentTaskPhase || statusMessage || 'Arbejder…').replace(/^[^\p{L}\p{N}]+/u, '')}
       </p>
-      <p className="mt-1 text-[13px] text-ink-faint">Du kan blive på siden – resultaterne dukker op, efterhånden som de er klar.</p>
+      <p className="mt-1 text-[13px] text-ink-faint">Grundig retning kan tage et par minutter pr. besvarelse. Lad siden være åben – resultaterne dukker op, efterhånden som de er klar.</p>
     </section>
   );
 }
