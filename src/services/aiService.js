@@ -10,8 +10,11 @@ const ENDPOINT = '/.netlify/functions/grade-exam';
  * Ret her hvis I skifter model via OPENAI_MODEL på Netlify.
  */
 export const MODEL_PRICES = {
+  'gpt-6.1-sol': { input: 2, output: 10 },
+  'gpt-6-astra': { input: 10, output: 50 },
+  'gpt-6-luna': { input: 0.1, output: 0.5 },
   'gpt-4o': { input: 2.5, output: 10 },
-  default: { input: 2.5, output: 10 }
+  default: { input: 2, output: 10 }
 };
 
 export function calculateCost(usage, model) {

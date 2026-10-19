@@ -25,6 +25,9 @@ export function efterbehandlMatematik(aiResult, omsaetningstabel) {
             advarsler.push(`Opgave ${opgave.nummer}: AI gav ${givetPoint} af ${maxPoint} point – rettet til ${Math.min(Math.max(givetPoint, 0), maxPoint)}.`);
             givetPoint = Math.min(Math.max(givetPoint, 0), maxPoint);
         }
+        if (opgave.usikker) {
+            advarsler.push(`Opgave ${opgave.nummer}: AI er usikker${opgave.usikkerhed ? ` – ${opgave.usikkerhed}` : ''}.`);
+        }
         return { ...opgave, givetPoint, maxPoint };
     });
 
