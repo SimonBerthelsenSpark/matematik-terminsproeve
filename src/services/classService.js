@@ -11,6 +11,7 @@ import {
   query,
   orderBy,
   serverTimestamp,
+  increment,
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase.js';
@@ -155,13 +156,9 @@ export async function addStudent(classId, studentData) {
       createdAt: serverTimestamp()
     });
     
-    // Update student count in class
-    const classRef = doc(db, 'classes', classId);
-    const classSnap = await getDoc(classRef);
-    const currentCount = classSnap.data()?.studentCount || 0;
-    
-    await updateDoc(classRef, {
-      studentCount: currentCount + 1,
+    // Atomisk optælling – kan ikke komme ud af sync ved samtidige ændringer
+    await updateDoc(doc(db, 'classes', classId), {
+      studentCount: increment(1),
       updatedAt: serverTimestamp()
     });
     
@@ -232,13 +229,9 @@ export async function deleteStudent(classId, studentId) {
     const docRef = doc(db, 'classes', classId, 'students', studentId);
     await deleteDoc(docRef);
     
-    // Update student count in class
-    const classRef = doc(db, 'classes', classId);
-    const classSnap = await getDoc(classRef);
-    const currentCount = classSnap.data()?.studentCount || 0;
-    
-    await updateDoc(classRef, {
-      studentCount: Math.max(0, currentCount - 1),
+    // Atomisk nedtælling
+    await updateDoc(doc(db, 'classes', classId), {
+      studentCount: increment(-1),
       updatedAt: serverTimestamp()
     });
   } catch (error) {

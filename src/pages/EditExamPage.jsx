@@ -1,268 +1,94 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { Link, useParams } from 'react-router-dom';
 import { useExams } from '../hooks/useExams.js';
 import { useClasses } from '../hooks/useClasses.js';
+import { ExamShell } from '../components/ExamShell.jsx';
 import { Layout } from '../components/Layout.jsx';
-import { Loader2, AlertCircle, CheckCircle } from '../components/Icons.jsx';
-import { uploadExamFile } from '../services/storageService.js';
+import { Loader2, RefreshCw } from '../components/Icons.jsx';
+import { FileField, Section, Spinner, Notice } from '../components/ui.jsx';
+import { uploadExamFile, getFileDownloadURL } from '../services/storageService.js';
 import { updateExam, updateExamFileRef, generateVaegttabel, updateVaegttabel } from '../services/firestoreService.js';
 import { parseDanskBedoemmelse, getCachedParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
-import { getFileDownloadURL } from '../services/storageService.js';
+import { OmsaetningstabelEditor } from '../components/OmsaetningstabelEditor.jsx';
+import { totalVaegt, vaegteSummererTil100 } from '../utils/karakter.js';
+import { harMateriale } from '../utils/examStatus.js';
+
+const FILTYPER = {
+  rettevejledning: { ref: 'rettevejledningRef', label: 'Rettevejledning', hint: 'PDF eller Word' },
+  'omsætningstabel': { ref: 'omsætningstabelRef', label: 'Omsætningstabel', hint: 'PDF eller Word. Tallene læses ind i tabellen nedenfor.' },
+  bedoemmelseskema: { ref: 'bedoemmelseskemaRef', label: 'Bedømmelseskema', hint: 'PDF eller Word med kriterier og vægte' }
+};
 
 /**
- * EditExamPage - Form for editing an existing exam and uploading files
+ * Trin 1: Materiale – filer, omsætningstabel/vægttabel og prøvens oplysninger.
  */
 export function EditExamPage() {
-  const navigate = useNavigate();
   const { examId } = useParams();
-  const { exams, refreshExams } = useExams();
-  const { classes, loading: loadingClasses } = useClasses();
+  const { exams, loading: loadingExams, refreshExams } = useExams();
+  const { classes } = useClasses();
 
   const [exam, setExam] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    beskrivelse: '',
-    dato: '',
-    klasse: '',
-    type: 'Matematik'
-  });
-  
-  const [useCustomClass, setUseCustomClass] = useState(false);
-  const [customClassName, setCustomClassName] = useState('');
-
+  const [formData, setFormData] = useState({ beskrivelse: '', dato: '', klasse: '', type: 'Matematik' });
   const [errors, setErrors] = useState({});
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(null);
+  const [savingInfo, setSavingInfo] = useState(false);
 
-  // File upload states
-  const [rettevejledningFile, setRettevejledningFile] = useState(null);
-  const [omsætningstabelFile, setOmsætningstabelFile] = useState(null);
-  const [bedoemmelseskemaFile, setBedoemmelseskemaFile] = useState(null);
-  const [uploadingRettevejledning, setUploadingRettevejledning] = useState(false);
-  const [uploadingOmsætningstabel, setUploadingOmsætningstabel] = useState(false);
-  const [uploadingBedoemmelseskema, setUploadingBedoemmelseskema] = useState(false);
-  
-  // Vægttabel states (Dansk only)
+  const [selectedFiles, setSelectedFiles] = useState({});
+  const [uploading, setUploading] = useState(null);
+
   const [vaegttabel, setVaegttabel] = useState(null);
-  const [editingVaegttabel, setEditingVaegttabel] = useState(false);
+  const [vaegtDirty, setVaegtDirty] = useState(false);
   const [generatingVaegttabel, setGeneratingVaegttabel] = useState(false);
   const [savingVaegttabel, setSavingVaegttabel] = useState(false);
 
-  /**
-   * Load exam data
-   */
+  // Hent prøven fra listen og fyld formularen første gang
   useEffect(() => {
-    const currentExam = exams.find(e => e.id === examId);
-    if (currentExam) {
-      console.log('📋 Loading exam data:', currentExam.id);
-      console.log('🗂️ Rettevejledning:', currentExam.rettevejledningRef?.fileName || 'Ingen');
-      console.log('🗂️ Omsætningstabel:', currentExam.omsætningstabelRef?.fileName || 'Ingen');
-      
-      setExam(currentExam);
-      
-      // Format date for input field (only if not already set)
-      let dateString = '';
-      if (currentExam.dato) {
-        const dateObj = currentExam.dato.toDate ? currentExam.dato.toDate() : new Date(currentExam.dato);
-        dateString = dateObj.toISOString().split('T')[0];
-      }
-      
-      // Only update formData if it's the initial load
-      if (loading || !formData.beskrivelse) {
-        setFormData({
-          beskrivelse: currentExam.beskrivelse || '',
-          dato: dateString,
-          klasse: currentExam.klasse || '',
-          type: currentExam.type || 'Matematik'
-        });
-      }
-      
-      setLoading(false);
-    } else if (exams.length > 0) {
-      // Exam not found
-      console.error('❌ Exam not found:', examId);
-      setSubmitError('Prøve ikke fundet');
-      setLoading(false);
-    }
-  }, [examId, exams]);
-  
-  /**
-   * Load vægttabel from exam (Dansk only)
-   */
-  useEffect(() => {
-    if (exam && exam.type === 'Dansk' && exam.vaegttabel) {
-      setVaegttabel(exam.vaegttabel);
-    }
-  }, [exam]);
-  
-  /**
-   * Generate vægttabel from bedømmelseskema
-   */
-  const handleGenerateVaegttabel = async () => {
-    if (!exam || !exam.bedoemmelseskemaRef) {
-      alert('Upload bedømmelseskema først');
-      return;
-    }
-    
+    const current = exams.find(e => e.id === examId);
+    if (!current) return;
+    setExam(current);
+    setFormData(prev => prev.beskrivelse ? prev : {
+      beskrivelse: current.beskrivelse || '',
+      dato: current.dato ? (current.dato.toDate ? current.dato.toDate() : new Date(current.dato)).toISOString().split('T')[0] : '',
+      klasse: current.klasse || '',
+      type: current.type || 'Matematik'
+    });
+    if (current.type === 'Dansk' && current.vaegttabel && !vaegtDirty) setVaegttabel(current.vaegttabel);
+  }, [examId, exams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!exam) {
+    return (
+      <Layout>
+        {loadingExams || exams.length === 0 ? <Spinner label="Indlæser prøve…" /> : (
+          <Notice title="Prøven findes ikke">Den kan være slettet. <Link to="/" className="underline">Gå til alle prøver</Link>.</Notice>
+        )}
+      </Layout>
+    );
+  }
+
+  const isDansk = exam.type === 'Dansk';
+  const fileTypes = isDansk ? ['bedoemmelseskema'] : ['rettevejledning', 'omsætningstabel'];
+
+  // ---------- Filer ----------
+
+  const openFile = async (ref) => {
     try {
-      setGeneratingVaegttabel(true);
-      
-      // Check if we have cached parsed bedømmelseskema
-      let parsedBedoemmelse = getCachedParsedBedoemmelse(exam);
-      
-      if (!parsedBedoemmelse || !parsedBedoemmelse.dele || parsedBedoemmelse.dele.length === 0) {
-        // Need to download and parse bedømmelseskema
-        const url = await getFileDownloadURL(exam.bedoemmelseskemaRef.storagePath);
-        const response = await fetch(url);
-        const blob = await response.blob();
-        const file = new File([blob], exam.bedoemmelseskemaRef.fileName, {
-          type: exam.bedoemmelseskemaRef.contentType
-        });
-        
-        parsedBedoemmelse = await parseDanskBedoemmelse(file);
-      }
-      
-      // Generate vægttabel
-      const newVaegttabel = await generateVaegttabel(examId, parsedBedoemmelse);
-      setVaegttabel(newVaegttabel);
-      
-      // Refresh exams to get updated data
-      await refreshExams();
-      
-      alert('Vægttabel genereret succesfuldt!');
-    } catch (error) {
-      console.error('Error generating vægttabel:', error);
-      alert(`Fejl ved generering af vægttabel: ${error.message}`);
-    } finally {
-      setGeneratingVaegttabel(false);
-    }
-  };
-  
-  /**
-   * Handle weight change in vægttabel
-   */
-  const handleWeightChange = (delIdx, kritIdx, newWeight) => {
-    const updated = { ...vaegttabel };
-    updated.dele[delIdx].kriterier[kritIdx].vaegt = parseFloat(newWeight);
-    setVaegttabel(updated);
-  };
-  
-  /**
-   * Save updated vægttabel
-   */
-  const handleSaveVaegttabel = async () => {
-    try {
-      setSavingVaegttabel(true);
-      await updateVaegttabel(examId, vaegttabel);
-      await refreshExams();
-      setEditingVaegttabel(false);
-      alert('Vægttabel gemt!');
-    } catch (error) {
-      console.error('Error saving vægttabel:', error);
-      alert(`Fejl ved gemning: ${error.message}`);
-    } finally {
-      setSavingVaegttabel(false);
+      window.open(await getFileDownloadURL(ref.storagePath), '_blank', 'noopener');
+    } catch (err) {
+      toast.error(`Filen kunne ikke åbnes: ${err.message}`);
     }
   };
 
-  /**
-   * Handle input change
-   */
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value
-    }));
-
-    // Clear error for this field
-    if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: null
-      }));
-    }
-  };
-
-  /**
-   * Handle file selection
-   */
-  const handleFileChange = (e, fileType) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (fileType === 'rettevejledning') {
-        setRettevejledningFile(file);
-      } else if (fileType === 'omsætningstabel') {
-        setOmsætningstabelFile(file);
-      } else if (fileType === 'bedoemmelseskema') {
-        setBedoemmelseskemaFile(file);
-      }
-    }
-  };
-
-  /**
-   * Upload a file
-   */
   const handleFileUpload = async (fileType) => {
-    let file, setUploading;
-    
-    if (fileType === 'rettevejledning') {
-      file = rettevejledningFile;
-      setUploading = setUploadingRettevejledning;
-    } else if (fileType === 'omsætningstabel') {
-      file = omsætningstabelFile;
-      setUploading = setUploadingOmsætningstabel;
-    } else if (fileType === 'bedoemmelseskema') {
-      file = bedoemmelseskemaFile;
-      setUploading = setUploadingBedoemmelseskema;
-    }
-    
-    if (!file) {
-      console.warn('⚠️ No file selected');
-      alert('Vælg venligst en fil først');
-      return;
-    }
-    
+    const file = selectedFiles[fileType];
+    if (!file) return;
+    const { ref: refField, label } = FILTYPER[fileType];
     try {
-      setUploading(true);
-      
-      console.log('='.repeat(60));
-      console.log(`📤 Starting upload for ${fileType}`);
-      console.log(`📁 File name: ${file.name}`);
-      console.log(`📊 File size: ${file.size} bytes`);
-      console.log(`📋 File type: ${file.type}`);
-      console.log(`🔑 Exam ID: ${examId}`);
-      console.log('='.repeat(60));
-      
-      // Upload file to storage
-      console.log('Step 1: Uploading to Firebase Storage...');
+      setUploading(fileType);
       const uploadResult = await uploadExamFile(examId, file, fileType);
-      console.log('✅ Step 1 Complete - Upload result:', JSON.stringify(uploadResult, null, 2));
-      
-      // Update Firestore with file reference
-      let fileRefField;
-      if (fileType === 'rettevejledning') {
-        fileRefField = 'rettevejledningRef';
-      } else if (fileType === 'omsætningstabel') {
-        fileRefField = 'omsætningstabelRef';
-      } else if (fileType === 'bedoemmelseskema') {
-        fileRefField = 'bedoemmelseskemaRef';
-      }
-      
-      console.log(`Step 2: Updating Firestore field "${fileRefField}"...`);
-      await updateExamFileRef(examId, fileRefField, uploadResult);
-      console.log(`✅ Step 2 Complete - Firestore updated`);
-      
-      // Refresh exam data
-      console.log('Step 3: Refreshing exam list...');
-      await refreshExams();
-      console.log(`✅ Step 3 Complete - Exams refreshed`);
-      
-      // Update local exam state with the new file reference
-      console.log('Step 4: Updating local state...');
-      setExam(prevExam => ({
-        ...prevExam,
-        [fileRefField]: {
+      await updateExamFileRef(examId, refField, uploadResult);
+      setExam(prev => ({
+        ...prev,
+        [refField]: {
           fileName: uploadResult.metadata.fileName,
           storagePath: uploadResult.storagePath,
           uploadedAt: new Date(),
@@ -270,664 +96,273 @@ export function EditExamPage() {
           contentType: uploadResult.metadata.contentType
         }
       }));
-      console.log(`✅ Step 4 Complete - Local state updated`);
-      
-      // Clear file input
-      if (fileType === 'rettevejledning') {
-        setRettevejledningFile(null);
-      } else if (fileType === 'omsætningstabel') {
-        setOmsætningstabelFile(null);
-      } else if (fileType === 'bedoemmelseskema') {
-        setBedoemmelseskemaFile(null);
-      }
-      
-      console.log('='.repeat(60));
-      console.log(`🎉 SUCCESS: ${fileType} uploaded successfully!`);
-      console.log('='.repeat(60));
-      
-      const fileNames = {
-        'rettevejledning': 'Rettevejledning',
-        'omsætningstabel': 'Omsætningstabel',
-        'bedoemmelseskema': 'Bedømmelseskema'
-      };
-      alert(`${fileNames[fileType]} uploadet succesfuldt!`);
+      setSelectedFiles(prev => ({ ...prev, [fileType]: null }));
+      await refreshExams();
+      toast.success(`${label} er uploadet`);
     } catch (err) {
-      console.error('='.repeat(60));
-      console.error(`❌ ERROR uploading ${fileType}`);
-      console.error('Error object:', err);
-      console.error('Error message:', err.message);
-      console.error('Error code:', err.code);
-      console.error('Error stack:', err.stack);
-      console.error('='.repeat(60));
-      
-      let errorMessage = 'Ukendt fejl';
-      
-      if (err.code === 'storage/unauthorized') {
-        errorMessage = 'Du har ikke tilladelse til at uploade filer. Tjek Firebase Storage regler.';
-      } else if (err.code === 'storage/canceled') {
-        errorMessage = 'Upload blev annulleret.';
-      } else if (err.code === 'storage/unknown') {
-        errorMessage = 'Der opstod en ukendt fejl. Tjek din internetforbindelse.';
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
-      alert(`Fejl ved upload af ${fileType}:\n\n${errorMessage}\n\nSe browserkonsollen for detaljer.`);
+      const msg = err.code === 'storage/unauthorized'
+        ? 'Du har ikke adgang til at uploade. Tjek Firebase Storage-reglerne.'
+        : err.message;
+      toast.error(`${label} kunne ikke uploades: ${msg}`);
     } finally {
-      setUploading(false);
+      setUploading(null);
     }
   };
 
-  /**
-   * Validate form
-   */
-  const validate = () => {
-    const newErrors = {};
+  // ---------- Vægttabel (Dansk) ----------
 
-    if (!formData.beskrivelse.trim()) {
-      newErrors.beskrivelse = 'Beskrivelse er påkrævet';
-    }
-
-    if (!formData.dato) {
-      newErrors.dato = 'Dato er påkrævet';
-    }
-
-    const selectedClass = useCustomClass ? customClassName : formData.klasse;
-    if (!selectedClass || !selectedClass.trim()) {
-      newErrors.klasse = 'Klasse er påkrævet';
-    }
-
-    if (!formData.type) {
-      newErrors.type = 'Type er påkrævet';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  /**
-   * Handle form submission
-   */
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitError(null);
-
-    if (!validate()) {
+  const handleGenerateVaegttabel = async () => {
+    if (!exam.bedoemmelseskemaRef) {
+      toast.error('Upload bedømmelseskemaet først');
       return;
     }
-
     try {
-      setSubmitting(true);
-
-      const className = useCustomClass ? customClassName.trim() : formData.klasse;
-
-      // Update exam metadata
-      const updates = {
-        beskrivelse: formData.beskrivelse,
-        klasse: className,
-        type: formData.type,
-        dato: new Date(formData.dato)
-      };
-
-      await updateExam(examId, updates);
-      
-      // Navigate back to home
-      navigate('/');
-    } catch (err) {
-      console.error('Error updating exam:', err);
-      setSubmitError(err.message || 'Kunne ikke opdatere prøve');
-      setSubmitting(false);
+      setGeneratingVaegttabel(true);
+      let parsed = vaegttabel ? null : getCachedParsedBedoemmelse(exam);
+      if (!parsed?.dele?.length) {
+        const url = await getFileDownloadURL(exam.bedoemmelseskemaRef.storagePath);
+        const blob = await (await fetch(url)).blob();
+        const file = new File([blob], exam.bedoemmelseskemaRef.fileName, { type: exam.bedoemmelseskemaRef.contentType });
+        parsed = await parseDanskBedoemmelse(file);
+      }
+      const ny = await generateVaegttabel(examId, parsed);
+      setVaegttabel(ny);
+      setVaegtDirty(false);
+      await refreshExams();
+      toast.success('Kriterierne er læst fra bedømmelseskemaet');
+    } catch (error) {
+      toast.error(`Kriterierne kunne ikke læses: ${error.message}`);
+    } finally {
+      setGeneratingVaegttabel(false);
     }
   };
 
-  if (loading) {
-    return (
-      <Layout>
-        <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-          <Loader2 />
-          <p className="text-gray-600 mt-4">Indlæser prøve...</p>
-        </div>
-      </Layout>
-    );
-  }
+  const handleWeightChange = (delIdx, kritIdx, newWeight) => {
+    const vaegt = newWeight === '' ? 0 : parseFloat(newWeight);
+    setVaegtDirty(true);
+    setVaegttabel(prev => ({
+      ...prev,
+      dele: prev.dele.map((del, dIdx) => {
+        if (dIdx !== delIdx) return del;
+        const kriterier = del.kriterier.map((krit, kIdx) => (kIdx === kritIdx ? { ...krit, vaegt } : krit));
+        const sum = kriterier.reduce((s, k) => s + (Number(k.vaegt) || 0), 0);
+        return { ...del, kriterier, totalVaegt: Math.round(sum * 100) / 100 };
+      })
+    }));
+  };
 
-  if (!exam) {
-    return (
-      <Layout>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <div className="flex items-start gap-3">
-            <AlertCircle />
-            <div>
-              <p className="font-semibold text-red-800">Prøve ikke fundet</p>
-              <p className="text-red-700 text-sm mt-1">{submitError || 'Denne prøve eksisterer ikke.'}</p>
-            </div>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
+  const handleSaveVaegttabel = async () => {
+    if (totalVaegt(vaegttabel) <= 0) {
+      toast.error('Vægtene skal tilsammen være mere end 0 %');
+      return;
+    }
+    try {
+      setSavingVaegttabel(true);
+      await updateVaegttabel(examId, vaegttabel);
+      await refreshExams();
+      setVaegtDirty(false);
+      toast.success('Vægtene er gemt');
+    } catch (error) {
+      toast.error(`Vægtene kunne ikke gemmes: ${error.message}`);
+    } finally {
+      setSavingVaegttabel(false);
+    }
+  };
+
+  // ---------- Oplysninger ----------
+
+  const canChangeType = !(exam.stats?.totalSubmissions > 0);
+  const klasseFindes = classes.some(c => c.className === formData.klasse);
+
+  const handleSaveInfo = async (e) => {
+    e.preventDefault();
+    const errs = {};
+    if (!formData.beskrivelse.trim()) errs.beskrivelse = 'Giv prøven en titel';
+    if (!formData.dato) errs.dato = 'Vælg prøvens dato';
+    if (!formData.klasse.trim()) errs.klasse = 'Vælg klassen';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+
+    try {
+      setSavingInfo(true);
+      await updateExam(examId, {
+        beskrivelse: formData.beskrivelse.trim(),
+        klasse: formData.klasse.trim(),
+        type: formData.type,
+        dato: new Date(formData.dato)
+      });
+      await refreshExams();
+      toast.success('Oplysningerne er gemt');
+    } catch (err) {
+      toast.error(`Oplysningerne kunne ikke gemmes: ${err.message}`);
+    } finally {
+      setSavingInfo(false);
+    }
+  };
+
+  const klar = harMateriale(exam);
 
   return (
-    <Layout>
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">
-            Rediger prøve
-          </h2>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Beskrivelse */}
-            <div>
-              <label
-                htmlFor="beskrivelse"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Beskrivelse <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                id="beskrivelse"
-                name="beskrivelse"
-                value={formData.beskrivelse}
-                onChange={handleChange}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.beskrivelse
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
-                }`}
-                placeholder="f.eks. FP10 Matematik Efterår 2024"
-              />
-              {errors.beskrivelse && (
-                <p className="mt-1 text-sm text-red-600">{errors.beskrivelse}</p>
-              )}
+    <ExamShell
+      exam={exam}
+      step="materiale"
+      actions={klar && <Link to={`/exams/${examId}/matrix`} className="btn-primary">Fortsæt til besvarelser</Link>}
+    >
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] items-start">
+        <div className="space-y-6 min-w-0">
+          <Section
+            title={isDansk ? 'Bedømmelseskema' : 'Rettevejledning og omsætningstabel'}
+            description={isDansk ? 'AI bedømmer hvert kriterium i skemaet på 7-trinsskalaen.' : 'AI giver point efter rettevejledningen. Karakteren beregnes ud fra omsætningstabellen.'}
+          >
+            <div className="space-y-5">
+              {fileTypes.map(type => (
+                <FileField
+                  key={type}
+                  id={`fil-${type}`}
+                  label={FILTYPER[type].label}
+                  hint={FILTYPER[type].hint}
+                  accept=".pdf,.docx,.txt"
+                  current={exam[FILTYPER[type].ref]}
+                  selected={selectedFiles[type] || null}
+                  onSelect={(f) => setSelectedFiles(prev => ({ ...prev, [type]: f }))}
+                  onUpload={() => handleFileUpload(type)}
+                  uploading={uploading === type}
+                  onOpen={exam[FILTYPER[type].ref] ? () => openFile(exam[FILTYPER[type].ref]) : undefined}
+                />
+              ))}
             </div>
+          </Section>
 
-            {/* Dato */}
-            <div>
-              <label
-                htmlFor="dato"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Dato <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                id="dato"
-                name="dato"
-                value={formData.dato}
-                onChange={handleChange}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.dato
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
-                }`}
-              />
-              {errors.dato && (
-                <p className="mt-1 text-sm text-red-600">{errors.dato}</p>
-              )}
-            </div>
+          {!isDansk && (
+            <Section
+              title="Omsætningstabel"
+              description="Point → karakter. Tjek tallene, før du retter – karaktererne beregnes ud fra denne tabel."
+            >
+              <OmsaetningstabelEditor exam={exam} examId={examId} onSaved={refreshExams} />
+            </Section>
+          )}
 
-            {/* Klasse */}
-            <div>
-              <label
-                htmlFor="klasse"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Klasse <span className="text-red-500">*</span>
-              </label>
-              
-              {loadingClasses ? (
-                <div className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50">
-                  <Loader2 />
-                  <span className="text-gray-600 text-sm">Indlæser klasser...</span>
-                </div>
+          {isDansk && exam.bedoemmelseskemaRef && (
+            <Section
+              title="Kriterier og vægte"
+              description="Vægtene bestemmer, hvor meget hvert kriterium tæller i den samlede karakter."
+              actions={
+                <button type="button" className="btn-secondary btn-sm" onClick={handleGenerateVaegttabel} disabled={generatingVaegttabel}>
+                  {generatingVaegttabel ? <Loader2 /> : <RefreshCw className="w-4 h-4" />}
+                  {vaegttabel ? 'Læs igen fra skemaet' : 'Læs kriterier fra skemaet'}
+                </button>
+              }
+            >
+              {!vaegttabel ? (
+                <p className="text-sm text-ink-soft">Kriterierne er ikke læst endnu. Tryk "Læs kriterier fra skemaet".</p>
               ) : (
-                <>
-                  {!useCustomClass && classes.length > 0 ? (
-                    <div className="space-y-2">
-                      <select
-                        id="klasse"
-                        name="klasse"
-                        value={formData.klasse}
-                        onChange={handleChange}
-                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                          errors.klasse
-                            ? 'border-red-300 bg-red-50'
-                            : 'border-gray-300'
-                        }`}
-                      >
-                        <option value="">Vælg en klasse...</option>
-                        {classes.map((cls) => (
-                          <option key={cls.id} value={cls.className}>
-                            {cls.className}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => setUseCustomClass(true)}
-                        className="text-sm text-indigo-600 hover:text-indigo-700"
-                      >
-                        Eller indtast et andet klassenavn
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        id="customKlasse"
-                        value={customClassName || formData.klasse}
-                        onChange={(e) => {
-                          setCustomClassName(e.target.value);
-                          if (errors.klasse) {
-                            setErrors((prev) => ({ ...prev, klasse: null }));
-                          }
-                        }}
-                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                          errors.klasse
-                            ? 'border-red-300 bg-red-50'
-                            : 'border-gray-300'
-                        }`}
-                        placeholder="f.eks. 9A"
-                      />
-                      {classes.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUseCustomClass(false);
-                            setCustomClassName('');
-                          }}
-                          className="text-sm text-indigo-600 hover:text-indigo-700"
-                        >
-                          Eller vælg fra eksisterende klasser
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </>
+                <VaegtTabel
+                  vaegttabel={vaegttabel}
+                  onChange={handleWeightChange}
+                  dirty={vaegtDirty}
+                  saving={savingVaegttabel}
+                  onSave={handleSaveVaegttabel}
+                />
               )}
-              
-              {errors.klasse && (
-                <p className="mt-1 text-sm text-red-600">{errors.klasse}</p>
-              )}
-            </div>
-
-            {/* Type */}
-            <div>
-              <label
-                htmlFor="type"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Type <span className="text-red-500">*</span>
-              </label>
-              <select
-                id="type"
-                name="type"
-                value={formData.type}
-                onChange={handleChange}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.type
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
-                }`}
-              >
-                <option value="Matematik">Matematik</option>
-                <option value="Dansk">Dansk</option>
-              </select>
-              {errors.type && (
-                <p className="mt-1 text-sm text-red-600">{errors.type}</p>
-              )}
-            </div>
-
-            {/* File Uploads Section - Conditional based on exam type */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Upload filer</h3>
-              
-              {formData.type === 'Matematik' ? (
-                <>
-                  {/* MATEMATIK: Rettevejledning Upload */}
-                  <div className="mb-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Rettevejledning
-                      </label>
-                      {exam.rettevejledningRef && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="w-5 h-5" />
-                          <span className="text-xs font-medium">Uploadet</span>
-                        </div>
-                      )}
-                    </div>
-                    {exam.rettevejledningRef ? (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              {exam.rettevejledningRef.fileName}
-                            </span>
-                          </div>
-                          <span className="text-xs text-green-600">
-                            Gemt i systemet
-                          </span>
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="flex gap-2">
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx"
-                        onChange={(e) => handleFileChange(e, 'rettevejledning')}
-                        className="flex-1 text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                        key={exam.rettevejledningRef?.uploadedAt || 'rettevejledning'}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleFileUpload('rettevejledning')}
-                        disabled={!rettevejledningFile || uploadingRettevejledning}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap"
-                      >
-                        {uploadingRettevejledning ? (
-                          <>
-                            <Loader2 />
-                            Uploader...
-                          </>
-                        ) : (
-                          exam.rettevejledningRef ? 'Erstat fil' : 'Upload'
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* MATEMATIK: Omsætningstabel Upload */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Omsætningstabel
-                      </label>
-                      {exam.omsætningstabelRef && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="w-5 h-5" />
-                          <span className="text-xs font-medium">Uploadet</span>
-                        </div>
-                      )}
-                    </div>
-                    {exam.omsætningstabelRef ? (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              {exam.omsætningstabelRef.fileName}
-                            </span>
-                          </div>
-                          <span className="text-xs text-green-600">
-                            Gemt i systemet
-                          </span>
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="flex gap-2">
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.xlsx,.xls"
-                        onChange={(e) => handleFileChange(e, 'omsætningstabel')}
-                        className="flex-1 text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                        key={exam.omsætningstabelRef?.uploadedAt || 'omsaetningstabel'}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleFileUpload('omsætningstabel')}
-                        disabled={!omsætningstabelFile || uploadingOmsætningstabel}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap"
-                      >
-                        {uploadingOmsætningstabel ? (
-                          <>
-                            <Loader2 />
-                            Uploader...
-                          </>
-                        ) : (
-                          exam.omsætningstabelRef ? 'Erstat fil' : 'Upload'
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              ) : formData.type === 'Dansk' ? (
-                <>
-                  {/* DANSK: Bedømmelseskema Upload */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        Bedømmelseskema
-                      </label>
-                      {exam.bedoemmelseskemaRef && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="w-5 h-5" />
-                          <span className="text-xs font-medium">Uploadet</span>
-                        </div>
-                      )}
-                    </div>
-                    {exam.bedoemmelseskemaRef ? (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600" />
-                            <span className="text-sm text-green-800 font-medium">
-                              {exam.bedoemmelseskemaRef.fileName}
-                            </span>
-                          </div>
-                          <span className="text-xs text-green-600">
-                            Gemt i systemet
-                          </span>
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="flex gap-2">
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx"
-                        onChange={(e) => handleFileChange(e, 'bedoemmelseskema')}
-                        className="flex-1 text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                        key={exam.bedoemmelseskemaRef?.uploadedAt || 'bedoemmelseskema'}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleFileUpload('bedoemmelseskema')}
-                        disabled={!bedoemmelseskemaFile || uploadingBedoemmelseskema}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap"
-                      >
-                        {uploadingBedoemmelseskema ? (
-                          <>
-                            <Loader2 />
-                            Uploader...
-                          </>
-                        ) : (
-                          exam.bedoemmelseskemaRef ? 'Erstat fil' : 'Upload'
-                        )}
-                      </button>
-                    </div>
-                    <p className="mt-2 text-xs text-blue-700 bg-blue-50 p-2 rounded border border-blue-200">
-                      ℹ️ Bedømmelseskemaet skal indeholde alle kriterier med vægte og beskrivelser
-                    </p>
-                  </div>
-                  
-                  {/* Vægttabel for Dansk */}
-                  {exam.bedoemmelseskemaRef && (
-                    <div className="mt-6 border-t pt-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h4 className="text-sm font-semibold text-gray-800">Vægttabel</h4>
-                          <p className="text-xs text-gray-600 mt-1">
-                            Vægten af hvert kriterium - bruges til karakterberegning
-                          </p>
-                        </div>
-                        {vaegttabel && (
-                          <div className="flex items-center gap-2 text-green-600">
-                            <CheckCircle className="w-5 h-5" />
-                            <span className="text-xs font-medium">Genereret</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {!vaegttabel ? (
-                        <button
-                          type="button"
-                          onClick={handleGenerateVaegttabel}
-                          disabled={generatingVaegttabel}
-                          className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-                        >
-                          {generatingVaegttabel ? (
-                            <>
-                              <Loader2 />
-                              Genererer vægttabel...
-                            </>
-                          ) : (
-                            <>
-                              ⚙️ Generer vægttabel fra bedømmelseskema
-                            </>
-                          )}
-                        </button>
-                      ) : (
-                        <div className="space-y-4">
-                          {/* Show/Edit Vægttabel */}
-                          {editingVaegttabel ? (
-                            <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
-                              <p className="text-amber-900 font-semibold text-sm mb-3">
-                                ✏️ Redigerer vægttabel - justér vægte nedenfor
-                              </p>
-                              <div className="space-y-4 max-h-96 overflow-y-auto">
-                                {vaegttabel.dele.map((del, delIdx) => (
-                                  <div key={delIdx} className="bg-white rounded-lg p-3 border border-gray-200">
-                                    <h5 className="font-semibold text-gray-800 mb-2 text-sm">
-                                      {del.navn} ({del.totalVaegt}%)
-                                    </h5>
-                                    <div className="space-y-2">
-                                      {del.kriterier.map((krit, kritIdx) => (
-                                        <div key={kritIdx} className="flex items-center gap-3 text-sm">
-                                          <label className="flex-1 text-gray-700">{krit.navn}</label>
-                                          <input
-                                            type="number"
-                                            step="0.1"
-                                            min="0"
-                                            max="100"
-                                            value={krit.vaegt}
-                                            onChange={(e) => handleWeightChange(delIdx, kritIdx, e.target.value)}
-                                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
-                                          />
-                                          <span className="text-gray-600 w-6">%</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex gap-2 mt-4">
-                                <button
-                                  type="button"
-                                  onClick={handleSaveVaegttabel}
-                                  disabled={savingVaegttabel}
-                                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors"
-                                >
-                                  {savingVaegttabel ? '💾 Gemmer...' : '✅ Gem vægttabel'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingVaegttabel(false)}
-                                  disabled={savingVaegttabel}
-                                  className="px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white text-sm font-semibold rounded-lg transition-colors"
-                                >
-                                  ❌ Annuller
-                                </button>
-                              </div>
-</div>
-                          ) : (
-                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                              <div className="space-y-3 max-h-64 overflow-y-auto">
-                                {vaegttabel.dele.map((del, delIdx) => (
-                                  <div key={delIdx} className="bg-white rounded-lg p-3 border border-gray-200">
-                                    <h5 className="font-semibold text-gray-800 mb-2 text-sm">
-                                      {del.navn} ({del.totalVaegt}%)
-                                    </h5>
-                                    <div className="space-y-1">
-                                      {del.kriterier.map((krit, kritIdx) => (
-                                        <div key={kritIdx} className="flex justify-between text-xs text-gray-700">
-                                          <span>{krit.navn}</span>
-                                          <span className="font-semibold">{krit.vaegt}%</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="flex gap-2 mt-4">
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingVaegttabel(true)}
-                                  className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors"
-                                >
-                                  ✏️ Rediger vægttabel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleGenerateVaegttabel}
-                                  disabled={generatingVaegttabel}
-                                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white text-sm font-semibold rounded-lg transition-colors"
-                                >
-                                  {generatingVaegttabel ? '⚙️ Genererer...' : '🔄 Gengenerer'}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : null}
-            </div>
-
-            {/* Submit Error */}
-            {submitError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <div className="flex items-start gap-3">
-                  <AlertCircle />
-                  <div>
-                    <p className="font-semibold text-red-800">Fejl</p>
-                    <p className="text-red-700 text-sm">{submitError}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Buttons */}
-            <div className="flex gap-4 pt-4">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 />
-                    Gemmer...
-                  </>
-                ) : (
-                  'Gem ændringer'
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                disabled={submitting}
-                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 font-semibold rounded-lg transition-colors"
-              >
-                Annuller
-              </button>
-            </div>
-          </form>
+            </Section>
+          )}
         </div>
+
+        <Section title="Oplysninger" className="lg:sticky lg:top-6">
+          <form onSubmit={handleSaveInfo} noValidate className="space-y-4">
+            <div>
+              <label htmlFor="beskrivelse" className="field-label">Titel</label>
+              <input id="beskrivelse" className={`input ${errors.beskrivelse ? 'input-invalid' : ''}`} value={formData.beskrivelse} onChange={(e) => setFormData(p => ({ ...p, beskrivelse: e.target.value }))} />
+              {errors.beskrivelse && <p className="field-error">{errors.beskrivelse}</p>}
+            </div>
+            <div>
+              <label htmlFor="dato" className="field-label">Dato</label>
+              <input id="dato" type="date" className={`input ${errors.dato ? 'input-invalid' : ''}`} value={formData.dato} onChange={(e) => setFormData(p => ({ ...p, dato: e.target.value }))} />
+              {errors.dato && <p className="field-error">{errors.dato}</p>}
+            </div>
+            <div>
+              <label htmlFor="klasse" className="field-label">Klasse</label>
+              <select id="klasse" className={`input ${errors.klasse ? 'input-invalid' : ''}`} value={formData.klasse} onChange={(e) => setFormData(p => ({ ...p, klasse: e.target.value }))}>
+                <option value="">Vælg klasse</option>
+                {!klasseFindes && formData.klasse && <option value={formData.klasse}>{formData.klasse} (ikke oprettet)</option>}
+                {classes.map(c => <option key={c.id} value={c.className}>{c.className}</option>)}
+              </select>
+              {errors.klasse && <p className="field-error">{errors.klasse}</p>}
+            </div>
+            <div>
+              <label htmlFor="type" className="field-label">Fag</label>
+              <select id="type" className="input" value={formData.type} onChange={(e) => setFormData(p => ({ ...p, type: e.target.value }))} disabled={!canChangeType}>
+                <option>Matematik</option>
+                <option>Dansk</option>
+              </select>
+              {!canChangeType && <p className="field-hint">Faget kan ikke ændres, når der er uploadet besvarelser.</p>}
+            </div>
+            <button type="submit" className="btn-secondary w-full" disabled={savingInfo}>
+              {savingInfo && <Loader2 />} Gem oplysninger
+            </button>
+          </form>
+        </Section>
       </div>
-    </Layout>
+    </ExamShell>
+  );
+}
+
+function VaegtTabel({ vaegttabel, onChange, dirty, saving, onSave }) {
+  const sum = Math.round(totalVaegt(vaegttabel) * 100) / 100;
+  const ok = vaegteSummererTil100(vaegttabel);
+
+  return (
+    <div>
+      <div className="border border-line rounded-control overflow-hidden">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Kriterium</th>
+              <th className="w-32 text-right">Vægt</th>
+            </tr>
+          </thead>
+          {vaegttabel.dele.map((del, delIdx) => (
+            <tbody key={delIdx}>
+              <tr>
+                <td colSpan={2} className="bg-paper/60 !py-2 text-[13px] font-semibold text-ink-soft">
+                  {del.navn} <span className="num font-normal">({del.totalVaegt} %)</span>
+                </td>
+              </tr>
+              {del.kriterier.map((krit, kritIdx) => (
+                <tr key={kritIdx}>
+                  <td>
+                    <label htmlFor={`v-${delIdx}-${kritIdx}`} className="block">{krit.navn}</label>
+                    {krit.beskrivelse && <span className="block text-[13px] text-ink-soft line-clamp-2">{krit.beskrivelse}</span>}
+                  </td>
+                  <td className="text-right">
+                    <div className="inline-flex items-center gap-1.5">
+                      <input
+                        id={`v-${delIdx}-${kritIdx}`}
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="100"
+                        value={krit.vaegt}
+                        onChange={(e) => onChange(delIdx, kritIdx, e.target.value)}
+                        className="input num h-8 w-20 text-right"
+                      />
+                      <span className="text-ink-soft">%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          ))}
+        </table>
+      </div>
+      <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <p className={`num text-sm ${ok ? 'text-ink-soft' : 'text-pen font-semibold'}`}>
+          I alt {sum} %{!ok && ' – vægtene bør give 100 %'}
+        </p>
+        <button type="button" className="btn-primary" onClick={onSave} disabled={!dirty || saving}>
+          {saving && <Loader2 />} Gem vægte
+        </button>
+      </div>
+    </div>
   );
 }

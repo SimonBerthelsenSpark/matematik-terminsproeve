@@ -10,7 +10,12 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    // Ingen offentlig source map – kildekoden skal ikke ligge åbent på sitet
+    sourcemap: false
+  },
+  // Fjern console.log/debug i produktion (de kan indeholde elevdata)
+  esbuild: {
+    pure: ['console.log', 'console.debug']
   },
   // Ensure compatibility with Firebase and other libraries
   optimizeDeps: {

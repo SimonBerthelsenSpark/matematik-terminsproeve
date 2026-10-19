@@ -3,7 +3,8 @@ import {
   uploadRettevejledning as uploadRettevejledningService,
   uploadOmsaetningstabel as uploadOmsaetningstabelService,
   uploadBedoemmelseskema as uploadBedoemmelseskemaService,
-  uploadSubmission as uploadSubmissionService
+  uploadSubmission as uploadSubmissionService,
+  sanitizeFilename
 } from '../services/storageService.js';
 import {
   updateExamFileRef,
@@ -250,17 +251,15 @@ export function useFileUpload() {
 
       setUploadProgress(15);
 
-      // Upload to Storage
-      console.log(`📤 Uploading submission for exam ${examId}...`);
-      const uploadResult = await uploadSubmissionService(examId, file);
-      setUploadProgress(60);
-
-      // Check if filename already exists
-      const filenameExists = await checkFilenameExists(examId, uploadResult.sanitizedFileName);
+      // Tjek for dublet FØR upload – ellers overskrives en anden elevs fil i Storage
+      const sanitizedFileName = sanitizeFilename(file.name);
+      const filenameExists = await checkFilenameExists(examId, sanitizedFileName);
       if (filenameExists) {
-        throw new Error(`A submission with filename "${uploadResult.sanitizedFileName}" already exists`);
+        throw new Error(`Der findes allerede en besvarelse med filnavnet "${sanitizedFileName}"`);
       }
 
+      // Upload to Storage
+      const uploadResult = await uploadSubmissionService(examId, file);
       setUploadProgress(75);
 
       // Add submission to Firestore

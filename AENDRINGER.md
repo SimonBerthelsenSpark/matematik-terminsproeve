@@ -1,0 +1,139 @@
+# AI Prøveretter – ændringer
+
+Filerne i denne pakke følger jeres repo-struktur. Kopiér dem ind oven i jeres projekt. Kun ændrede og nye filer er med.
+
+Koden er gendannet fra source map'en i deploy-zip'en. Den nye kode er bygget med Vite, og 55 unit tests er grønne. Alle skærme er gennemklikket med testdata (Firebase og AI udskiftet med en lokal attrap). Den er **ikke** testet mod jeres rigtige Firebase eller OpenAI. Kør den derfor på et deploy preview, før den går i produktion.
+
+## Skal gøres ved deploy
+
+1. **Udskift `netlify/functions/grade-exam.js`** med den nye. Den gamle funktion tog imod frie prompts fra browseren. Den nye tager kun imod faste opgavetyper. Klient og funktion skal derfor deployes samtidig.
+2. **Miljøvariabler i Netlify:**
+   - `OPENAI_API_KEY` (har I sikkert allerede, men tjek at navnet er det samme)
+   - `OPENAI_MODEL` (valgfri, standard `gpt-4o`)
+   - `ALLOWED_ORIGINS` (valgfri, hvis I bruger eget domæne, fx `https://retter.minskole.dk`)
+   - `OPENAI_TIMEOUT_MS` (valgfri, sæt den lidt under den tidsgrænse, jeres Netlify-plan giver funktioner)
+3. **Pakker:** `npm i @fontsource-variable/public-sans` og `npm i -D vitest`. Tilføj `"test": "vitest run"` til scripts i package.json.
+   Skriften hostes sammen med appen i stedet for at hentes fra Google Fonts, så skolerne undgår at sende data til Google.
+   `tailwind.config.js` og `src/index.css` er erstattet. Har jeres egen config andre `content`-stier end `./index.html` og `./src/**/*.{js,jsx}`, så flet dem ind.
+4. **vite.config.js:** Tilføj følgende, så `console.log` med elevdata fjernes i produktion, og kildekoden ikke ligger offentligt:
+   ```js
+   esbuild: { pure: ['console.log', 'console.debug'] },
+   build: { sourcemap: false },
+   ```
+5. **Firebase Storage-regler:** Permanent sletning af en prøve lister nu alle filer under `exams/{id}/`. Hvis reglerne ikke tillader `list`, falder den tilbage til at slette de kendte filer enkeltvis.
+
+## Design og brugervenlighed (runde 2)
+
+**Arbejdsgangen er samlet.** Hver prøve har tre trin øverst: Materiale → Besvarelser → Retning. Hvert trin viser sin status (✓, antal uploadet, antal godkendt), og der er en "Fortsæt"-knap til næste trin. De tre knapper på forsidekortet er væk.
+
+**Forsiden** er en tabel med fremdrift og kolonnen "Næste skridt" (fx "Ret 2 besvarelser" eller "Gennemse 3 karakterer"). Et klik på rækken går direkte til det trin, der mangler.
+
+**Klasser** har fået deres egen side med klasselisten til venstre og eleverne til højre. Nyt: **Indsæt elevliste**, så hele listen kan kopieres ind fra et regneark i én omgang.
+
+**Besvarelser:**
+- Én række pr. elev.
+- Nyt: **Upload flere filer**. Filerne matches automatisk til eleverne ud fra navn eller nummer i filnavnet, og du ser en oversigt, før noget uploades.
+- Filtypen tjekkes, før der uploades.
+
+**Retning** er en kompakt elevliste i stedet for store kort:
+- **Karaktermærket:** stiplet kant = AI-forslag, udfyldt = godkendt af dig. Det samme mærke bruges overalt.
+- Klik på en elev for at se opgaverne og rette point direkte i tabellen. Karakteren beregnes live.
+- Du godkender med én knap. Derefter **åbnes næste elev, der mangler gennemsyn, automatisk**.
+- "Spørg AI" ligger under hver opgave.
+
+**Godkendt-status gemmes nu** (`stats.reviewedCount`), så forsiden og trinene kan vise, hvor mange karakterer læreren har godkendt.
+
+**Visuelt:**
+- Rolig "blæk og rettepen"-palet. Rød bruges kun til det, der kræver handling.
+- Skriften er Public Sans med tabeltal.
+- Ingen emojis og gradienter.
+- Toasts nederst til højre.
+- Rigtige bekræftelsesdialoger erstatter `window.confirm`.
+- Virker på mobil (testet i 390 px bredde).
+
+**Tilgængelighed:**
+- Synligt tastaturfokus.
+- "Gå til indhold"-link.
+- Labels på alle felter.
+- Fokus flyttes til første fejl i formularer.
+- Respekterer "reducer bevægelse".
+
+**Andre små rettelser:**
+- Matriksen viste "–" for karakteren 00 og for alle Dansk-karakterer.
+- Statistik blev ikke nulstillet, når den sidste rettelse blev slettet.
+- Ikonerne ignorerede deres størrelse.
+- Faget kan ikke længere skiftes, efter der er uploadet besvarelser.
+
+**Nye filer:**
+- `src/components/ui.jsx`: knapper, felter, karaktermærke og dialog
+- `src/components/ExamShell.jsx`: prøvens trin
+- `src/pages/ClassesPage.jsx`
+- `src/utils/examStatus.js`
+- `src/utils/matchFiles.js` (med tests)
+
+**Kan slettes:** `src/hooks/useFileUpload.js` og `src/hooks/useFileHandling.js` bruges ikke længere.
+
+**Tjek ved test:** Denne arbejdsgang er ikke gennemklikket mod jeres rigtige data: upload af rigtige PDF/Word-filer i Besvarelser, "Læs kriterier fra skemaet" for Dansk og Vision-retning.
+
+## Sikkerhed og persondata (uden login)
+
+- **Prompts bygges på serveren.** Funktionen kan ikke længere bruges som gratis OpenAI-proxy til vilkårlige formål. Der er størrelsesgrænser på al input, og kun billeder som data-URL'er accepteres.
+- **Origin-tjek:** Kun jeres egne domæner og localhost får svar. Det stopper andre websites, men ikke et script, der forfalsker headeren. Det kræver login.
+- **Elevnavne fjernes**, før teksten sendes til AI. Navnet udledes af filnavnet ("12_Søren Hansen" → "[ELEV]"). Det virker ikke på billeder i Vision-tilstand, hvor navnet kan stå på siden.
+- **Prompt-injection:** Elevbesvarelsen pakkes ind i tags, og modellen får besked på at behandle den som data, ikke instruktioner.
+- **Window-globaler fjernet** (`window.db`, `window.firebase`, `window.mammoth`, `window.pdfjsLib`).
+- Ekstra sikkerheds-headers i `netlify.toml`.
+
+**Ikke løst (kræver login):** Firestore og Storage er stadig åbne for alle, der kender projekt-ID'et.
+
+## Karakterberegning
+
+- **Matematik-karakteren beregnes i koden** ud fra omsætningstabellen og kommer aldrig fra AI. Før blev AI'ens karakter brugt, også når totalen var rettet.
+- **Fejl i omsætningstabellen rettet:** "- 3" blev læst som 3, så 0 point gav karakteren 3. Halve point (fx 12,5) fandt ingen karakter og gav -3. Opslaget bruger nu "højeste karakter, hvor min-point ≤ point".
+- **Ny editor til omsætningstabellen** under Rediger prøve (Matematik). Den kan læse tabellen fra den uploadede fil, læreren kan rette den, og den gemmes som data på prøven (`omsaetningstabelData`). Tabellen valideres. Retningen bruger altid den gemte tabel, når den findes.
+- **Point valideres:** Point over `maxPoint` klemmes ned. Der vises en advarsel, hvis summen af `maxPoint` ikke passer med tabellens maksimum. Det tyder på, at AI har overset eller opfundet opgaver. Advarsler vises på elevkortet og gemmes.
+- **"/ 75" var hardcodet.** Maksimum beregnes nu ud fra opgaverne.
+- **Dansk: kriterier matches på id (K1, K2, …)** og ikke på rækkefølge. En manglende eller ugyldig delkarakter giver en tydelig fejl. Før blev den stille sat til 0.
+- **Dansk: vægtet gennemsnit normaliseres** med den faktiske vægtsum. Afrundingen findes nu ét sted (`src/utils/karakter.js`). Der er en konstant `ROUND_TIES_UP` for midtpunkter, fx 5,5. Den står til at runde ned som hidtil. **Tjek reglen for jeres prøver.**
+- **Vægttabel:** Summen vises live med advarsel, hvis den ikke er 100 %. Opdateringen muterer ikke længere state, og del-vægten følger kriterierne.
+- **Lærerens point pr. opgave forsvandt ved genindlæsning.** Det er rettet.
+- **Bedømmelseskema som PDF** virker nu. Før gav det fejlen "ikke implementeret".
+
+## AI-kald
+
+- **Structured outputs** (`json_schema`, `strict`) for retning og skema-parsing. Det fjerner ca. 170 linjer JSON-reparationskode. Afkortede svar meldes som fejl i stedet for at blive "repareret".
+- `temperature: 0` for mere ensartet retning.
+- Fælles klient (`src/services/aiService.js`) med retry og backoff ved 429, 5xx og timeouts. En timeout prøves højst én gang mere.
+- Model og pris er samlet ét sted. Omkostningen gemmes pr. elev og ikke som et gennemsnit.
+- **Vision:** Billederne holdes under ca. 4,2 MB samlet, så kaldet ikke rammer Netlifys grænse for request-størrelse. Kvaliteten sænkes efter behov.
+- Omsætningstabellen sendes ikke længere til AI, så der bruges færre tokens.
+
+## Robusthed og data
+
+- **Upload overskrev andres filer:** Tjekket for dubletter skete *efter* upload til Storage. Nu sker det før.
+- **Filnavne:** æ, ø og å translittereres (ø → oe). Før blev "Søren" til "S_ren".
+- **Student Matriks:** Besvarelser matches præcist, så elev "1_Anna" ikke også matcher "1_Anna Marie".
+- **Fejlede retninger kan prøves igen.** Før talte de som rettet, og knappen blev deaktiveret.
+- `studentCount` og `totalSubmissions` tælles atomisk og tælles ikke dobbelt, når en fil erstattes.
+- **Permanent sletning** fjerner nu også bedømmelseskemaer og gamle, erstattede filer. Batches deles op under Firestores grænse på 500 operationer.
+- Hvert elevkort hentede alle submissions. Listen sendes nu ned fra forælderen.
+
+## Kodekvalitet og ydelse
+
+- **Ruterne lazy-loades.** pdf.js og mammoth hentes først, når en fil skal læses. Startbundlen er gået fra ca. 1,57 MB til ca. 0,6 MB, målt i et testbyg med de samme biblioteker.
+- pdf.js-workeren bundles lokalt i stedet for at hentes fra et CDN.
+- Alle `alert()` og `window.confirm` er erstattet med toasts og bekræftelsesdialoger.
+- Debug-logs fjernet, blandt andet "SIMON TEST".
+- **Tests:** `src/utils/karakter.test.js`, `src/grading.test.js` og `netlify/function-tests/grade-exam.test.js`.
+
+## Ikke gjort (endnu)
+
+- Login og Firestore- og Storage-regler.
+- Yderligere opsplitning af `MathExamGrader.jsx`. Visningen er skrevet om og død kode fjernet, men indlæsning og retning ligger stadig samme sted.
+- Dobbelt-retning med markering af uenighed. Det koster dobbelt så meget, så det er jeres beslutning.
+- Skift af model. Sæt `OPENAI_MODEL` og ret prisen i `MODEL_PRICES`.
+
+## Bemærk
+
+- `ResultsOverview.jsx` blev importeret, men aldrig brugt. Importen er fjernet. Selve filen var ikke med i source map'en, så den ligger stadig i jeres repo.
+- `index.css` er ikke ændret og er ikke med i pakken.

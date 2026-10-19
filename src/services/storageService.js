@@ -1,4 +1,4 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import { storage } from '../config/firebase.js';
 
 /**
@@ -7,36 +7,28 @@ import { storage } from '../config/firebase.js';
  * @returns {string} Sanitized filename
  */
 export function sanitizeFilename(filename) {
-  try {
-    // Preserve extension
-    const lastDotIndex = filename.lastIndexOf('.');
-    if (lastDotIndex === -1) {
-      // No extension, sanitize entire filename
-      return filename
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')  // Remove diacritics
-        .replace(/[^a-zA-Z0-9._-]/g, '_')  // Replace invalid chars
-        .replace(/_+/g, '_')                // Collapse multiple underscores
-        .substring(0, 200);                 // Limit length
-    }
+  const clean = (str) => transliterate(str)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')  // Fjern accenter (é → e)
+    .replace(/[^a-zA-Z0-9._-]/g, '_')  // Ugyldige tegn → _
+    .replace(/_+/g, '_')                // Saml flere _
+    .replace(/^_+|_+$/g, '')            // Fjern _ i start/slut
+    .substring(0, 200);
 
-    const ext = filename.slice(lastDotIndex + 1);
-    const nameWithoutExt = filename.slice(0, lastDotIndex);
-    
-    // Sanitize name portion
-    const sanitized = nameWithoutExt
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')  // Remove diacritics
-      .replace(/[^a-zA-Z0-9._-]/g, '_')  // Replace invalid chars with underscore
-      .replace(/_+/g, '_')                // Collapse multiple underscores
-      .replace(/^_+|_+$/g, '')            // Remove leading/trailing underscores
-      .substring(0, 200);                 // Limit length
-    
-    return `${sanitized}.${ext}`;
-  } catch (error) {
-    console.error('Error sanitizing filename:', error);
-    return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-  }
+  const lastDotIndex = filename.lastIndexOf('.');
+  if (lastDotIndex === -1) return clean(filename);
+
+  const ext = filename.slice(lastDotIndex + 1).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  return `${clean(filename.slice(0, lastDotIndex))}.${ext}`;
+}
+
+/**
+ * Translitterér danske bogstaver, så "Søren" og "Soren" ikke ender som samme filnavn.
+ * (Uden dette blev ø til "_" og å til "a".)
+ */
+function transliterate(str) {
+  const map = { æ: 'ae', ø: 'oe', å: 'aa', Æ: 'Ae', Ø: 'Oe', Å: 'Aa', ü: 'ue', Ü: 'Ue', ö: 'oe', Ö: 'Oe', ä: 'ae', Ä: 'Ae', ß: 'ss' };
+  return String(str).replace(/[æøåÆØÅüÜöÖäÄß]/g, ch => map[ch]);
 }
 
 /**
@@ -245,18 +237,30 @@ export async function deleteFile(storagePath) {
 }
 
 /**
+ * Slet alle filer under en mappe i Storage (rekursivt).
+ * Kræver at Storage-reglerne tillader "list" på stien.
+ * @param {string} folderPath - fx 'exams/abc123'
+ * @returns {Promise<number>} antal slettede filer
+ */
+export async function deleteStorageFolder(folderPath) {
+  const { items, prefixes } = await listAll(ref(storage, folderPath));
+  let count = 0;
+  for (const item of items) {
+    await deleteFile(item.fullPath);
+    count++;
+  }
+  for (const prefix of prefixes) {
+    count += await deleteStorageFolder(prefix.fullPath);
+  }
+  return count;
+}
+
+/**
  * Delete all files in an exam folder
  * @param {string} examId - Exam document ID
- * @param {string} folderType - Folder type: 'rettevejledning', 'omsaetningstabel', or 'submissions'
- * @returns {Promise<void>}
+ * @param {string} folderType - Folder type: 'rettevejledning', 'omsaetningstabel', 'bedoemmelseskema' or 'submissions'
+ * @returns {Promise<number>} antal slettede filer
  */
 export async function deleteExamFolder(examId, folderType) {
-  try {
-    // Note: Firebase Storage doesn't have a delete folder operation
-    // Files should be tracked in Firestore and deleted individually
-    console.warn('deleteExamFolder requires individual file deletion based on Firestore metadata');
-  } catch (error) {
-    console.error('Error deleting exam folder:', error);
-    throw error;
-  }
+  return deleteStorageFolder(`exams/${examId}/${folderType}`);
 }

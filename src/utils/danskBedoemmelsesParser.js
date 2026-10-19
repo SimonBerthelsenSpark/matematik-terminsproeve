@@ -5,9 +5,8 @@
  * INGEN hardcoded kategorier - tilpasser sig automatisk til dokumentets struktur
  */
 
-import mammoth from 'mammoth';
-// Note: pdf-parse should be installed: npm install pdf-parse
-// import pdfParse from 'pdf-parse';
+import { callAI } from '../services/aiService.js';
+import { extractPdfText, extractWordText } from './docLibs.js';
 
 /**
  * Parse dansk bedømmelsesfil dynamisk og udtræk ALLE dele og kriterier
@@ -65,85 +64,15 @@ export async function parseDanskBedoemmelse(file) {
  * @returns {Promise<Object>} Parsed bedømmelseskema structure
  */
 async function parseWithAI(text) {
-  const systemPrompt = `Du er en ekspert i at analysere danske bedømmelseskemaer.
+  // Prompt og JSON-skema ligger på serveren (netlify/functions/grade-exam.js)
+  const { result: parsed } = await callAI('parseBedoemmelse', { tekst: text }, { timeoutMs: 45000 });
 
-Din opgave er at udtrække ALLE bedømmelseskriterier fra teksten og returnere dem i JSON format.
-
-VIGTIGE REGLER:
-1. Find ALLE sektioner/dele i dokumentet (f.eks. "Del B", "Del C", eller nummererede sektioner)
-2. For hver sektion, find ALLE kriterier
-3. Ignorer introduktionstekst og forklaringer - kun faktiske kriterier
-4. Hvis ingen procent-vægte er angivet, sæt alle til null (auto-tildeles senere)
-5. Uddrag beskrivelser fra bullet points under hvert kriterium
-
-RETURNER JSON med denne struktur:
-{
-  "dele": [
-    {
-      "navn": "Sektionsnavn",
-      "totalVaegt": null,
-      "kriterier": [
-        {
-          "navn": "Kriterienavn",
-          "vaegt": null,
-          "beskrivelse": "Beskrivelse af kriteriet fra dokumentet"
-        }
-      ]
-    }
-  ]
-}`;
-
-  const userPrompt = `Analyser følgende bedømmelseskema og udtræk ALLE kriterier:
-
-${text}
-
-Returner JSON strukturen.`;
-
-  try {
-    const response = await fetch('/.netlify/functions/grade-exam', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemPrompt,
-        userPrompt,
-        apiProvider: 'openai'
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`AI API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Unknown AI error');
-    }
-
-    const content = data.data.choices[0].message.content;
-    
-    // Extract JSON from response
-    let cleanContent = content.trim();
-    cleanContent = cleanContent.replace(/^```json\s*/i, '');
-    cleanContent = cleanContent.replace(/^```\s*/i, '');
-    cleanContent = cleanContent.replace(/\s*```$/i, '');
-    
-    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in AI response');
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    
-    // Validate structure
-    if (!parsed.dele || !Array.isArray(parsed.dele)) {
-      throw new Error('Invalid structure from AI');
-    }
-
-    return parsed;
-  } catch (error) {
-    console.error('AI parsing error:', error);
-    throw error;
+  if (!parsed?.dele || !Array.isArray(parsed.dele)) {
+    throw new Error('Invalid structure from AI');
   }
+  // Fjern tomme dele
+  parsed.dele = parsed.dele.filter(del => Array.isArray(del.kriterier) && del.kriterier.length > 0);
+  return parsed;
 }
 
 /**
@@ -153,11 +82,8 @@ Returner JSON strukturen.`;
  */
 async function parseWordDocument(file) {
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer });
-    return result.value;
+    return await extractWordText(file);
   } catch (error) {
-    console.error('Error parsing Word document:', error);
     throw new Error(`Kunne ikke læse Word dokument: ${error.message}`);
   }
 }
@@ -169,15 +95,11 @@ async function parseWordDocument(file) {
  */
 async function parsePDFDocument(file) {
   try {
-    // TODO: Implementer PDF parsing når pdf-parse er installeret
-    // const arrayBuffer = await file.arrayBuffer();
-    // const data = await pdfParse(arrayBuffer);
-    // return data.text;
-    
-    throw new Error('PDF parsing er ikke implementeret endnu. Brug venligst Word format (.docx)');
+    const text = await extractPdfText(file);
+    if (!text) throw new Error('PDF\'en indeholder ingen tekst (er den scannet?)');
+    return text;
   } catch (error) {
-    console.error('Error parsing PDF document:', error);
-    throw error;
+    throw new Error(`Kunne ikke læse PDF: ${error.message}`);
   }
 }
 

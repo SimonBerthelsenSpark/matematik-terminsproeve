@@ -1,14 +1,16 @@
 /**
- * StudentResult Component
- * 
- * Én elevs resultat med AI og lærer vurdering
- * Inkluderer alle delopgaver og redigeringsmulighed
+ * Matematik: én elevs retning. Læreren tjekker point pr. opgave og godkender karakteren.
  */
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Fragment } from 'react';
+import toast from 'react-hot-toast';
 import { OpgaveDetails } from './OpgaveDetails.jsx';
 import { getFileDownloadURL } from '../services/storageService.js';
 import { getSubmissions } from '../services/firestoreService.js';
+import { lookupKarakter, formatKarakter } from '../utils/karakter.js';
+import { GradeMark, Notice } from './ui.jsx';
+import { ExternalLink, ChevronDown, Loader2 } from './Icons.jsx';
+
+const fmt = (n) => String(Math.round(n * 10) / 10).replace('.', ',');
 
 export function StudentResult({
     result,
@@ -22,246 +24,200 @@ export function StudentResult({
     onCancelEdit,
     onUpdatePoint,
     onAskAIDetails,
-    examId
+    examId,
+    submissions = null,
+    omsaetningstabel = null
 }) {
     const [submissionPath, setSubmissionPath] = useState(null);
+    const [openOpgave, setOpenOpgave] = useState(null);
+    const [saving, setSaving] = useState(false);
 
-    /**
-     * Load submission metadata to get correct storage path
-     */
     useEffect(() => {
-        const loadSubmissionPath = async () => {
+        const load = async () => {
             if (!examId || !result.submissionId) return;
-            
             try {
-                // Get all submissions for the exam
-                const submissions = await getSubmissions(examId);
-                
-                // ✅ PRÆCIS match på submissionId
-                let submission = submissions.find(sub => sub.id === result.submissionId);
-
+                const list = submissions ?? await getSubmissions(examId);
+                let submission = list.find(sub => sub.id === result.submissionId);
                 if (!submission && result.fileName) {
-                    // Fallback: Prøv at matche på fileName
-                    console.warn(`⚠️ No exact submissionId match for ${result.submissionId}, trying fileName fallback`);
-                    const fileNameWithoutExt = result.fileName?.replace(/\.[^/.]+$/, '') || result.elevNavn?.replace(/\.[^/.]+$/, '');
-                    submission = submissions.find(sub =>
-                        sub.id === fileNameWithoutExt || sub.fileName === result.fileName
-                    );
+                    const base = result.fileName.replace(/\.[^/.]+$/, '');
+                    submission = list.find(sub => sub.id === base || sub.fileName === result.fileName);
                 }
-                
-                if (submission?.storagePath) {
-                    setSubmissionPath(submission.storagePath);
-                } else {
-                    console.debug('No submission found for:', result.submissionId || result.elevNavn);
-                }
+                if (submission?.storagePath) setSubmissionPath(submission.storagePath);
             } catch (err) {
-                console.debug('Error loading submission path:', err.message);
+                console.debug('Kunne ikke finde besvarelsens fil:', err.message);
             }
         };
-        
-        loadSubmissionPath();
-    }, [examId, result.submissionId, result.fileName, result.elevNavn]);
+        load();
+    }, [examId, result.submissionId, result.fileName, submissions]);
 
-    /**
-     * Open student submission in new tab
-     */
-    const handleOpenSubmission = async (e) => {
-        e.preventDefault();
+    const openSubmission = async () => {
         try {
-            if (!submissionPath) {
-                throw new Error('Submission fil kunne ikke findes');
-            }
-            
-            const url = await getFileDownloadURL(submissionPath);
-            window.open(url, '_blank');
+            window.open(await getFileDownloadURL(submissionPath), '_blank', 'noopener');
         } catch (err) {
-            console.error('Error opening submission:', err);
-            alert('Kunne ikke åbne opgaven: ' + err.message);
+            toast.error('Besvarelsen kunne ikke åbnes: ' + err.message);
         }
     };
-    // Handle error case
-    if (result.error) {
-        return (
-            <div className="bg-white rounded-lg shadow-lg p-6">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">{result.elevNavn}</h3>
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-red-700">Fejl: {result.error}</p>
-                </div>
-            </div>
-        );
-    }
 
-    // Calculate current teacher total if tempPoints exist
-    let currentTotalPoint = result.totalPoint;
-    let displaySource = "AI";
-    
-    if (result.opgaver && result.opgaver.length > 0) {
-        let tempTotal = 0;
-        let hasAnyTempPoints = false;
-        
-        result.opgaver.forEach((opgave, opIdx) => {
-            const tempKey = `${index}-${opIdx}`;
-            if (tempPoints[tempKey] !== undefined) {
-                tempTotal += parseFloat(tempPoints[tempKey]) || 0;
-                hasAnyTempPoints = true;
-            } else if (opgave.lærerPoint !== undefined) {
-                tempTotal += opgave.lærerPoint;
-                hasAnyTempPoints = true;
-            } else {
-                tempTotal += opgave.givetPoint || 0;
-            }
-        });
-        
-        if (hasAnyTempPoints || result.lærerTotalPoint !== undefined) {
-            currentTotalPoint = tempTotal;
-            displaySource = "teacher";
-        }
-    } else if (result.lærerTotalPoint !== undefined) {
-        currentTotalPoint = result.lærerTotalPoint;
-        displaySource = "teacher";
-    }
+    const opgaver = result.opgaver || [];
+    const approved = result.lærerKarakter !== undefined && result.lærerKarakter !== null;
+    const pointFor = (opgave, i) => {
+        const t = tempPoints[`${index}-${i}`];
+        if (t !== undefined) return parseFloat(t) || 0;
+        if (opgave.lærerPoint !== undefined) return opgave.lærerPoint;
+        return opgave.givetPoint || 0;
+    };
+    const maxTotal = opgaver.reduce((s, o) => s + (Number(o.maxPoint) || 0), 0);
+    const dineTotal = opgaver.reduce((s, o, i) => s + pointFor(o, i), 0);
+    const preview = omsaetningstabel?.length ? lookupKarakter(omsaetningstabel, dineTotal) : null;
+    const changed = opgaver.some((o, i) => pointFor(o, i) !== (o.givetPoint || 0));
+    const live = editMode || (!approved && changed);
+    const shownKarakter = live
+        ? (preview ?? (approved ? result.lærerKarakter : result.karakter))
+        : (approved ? result.lærerKarakter : result.karakter);
+
+    const handleApprove = async () => {
+        setSaving(true);
+        try { await onSaveEdit(); } finally { setSaving(false); }
+    };
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-3">
-            <div className="flex items-center gap-2 mb-2">
-                <h3 className="text-base font-bold text-gray-800">{result.elevNavn}</h3>
-                {examId && submissionPath && (
-                    <a
-                        href="#"
-                        onClick={handleOpenSubmission}
-                        className="text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
-                        title="Åbn opgave i ny fane"
-                    >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        <span>Se opgave</span>
-                    </a>
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem] items-start">
+            {/* Opgaver */}
+            <div className="surface overflow-hidden min-w-0">
+                {opgaver.length === 0 ? (
+                    <p className="p-5 text-sm text-ink-soft">Denne retning har ingen detaljer pr. opgave.</p>
+                ) : (
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>Opgave</th>
+                                <th className="hidden sm:table-cell w-16 text-right">Maks</th>
+                                <th className="w-16 text-right">AI</th>
+                                <th className="w-20 sm:w-28 text-right"><span className="sm:hidden">Dine</span><span className="hidden sm:inline">Dine point</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {opgaver.map((opgave, i) => {
+                                const key = `${index}-${i}`;
+                                const open = openOpgave === i;
+                                const dine = pointFor(opgave, i);
+                                const afviger = dine !== (opgave.givetPoint || 0);
+                                return (
+                                    <Fragment key={i}>
+                                        <tr className={open ? '[&>td]:border-b-0' : ''}>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOpenOpgave(open ? null : i)}
+                                                    aria-expanded={open}
+                                                    className="flex items-start gap-2 text-left w-full group"
+                                                >
+                                                    <ChevronDown className={`w-4 h-4 mt-0.5 text-ink-faint transition-transform ${open ? 'rotate-180' : ''}`} />
+                                                    <span className="min-w-0">
+                                                        <span className="block font-medium">Opgave {opgave.nummer}</span>
+                                                        {opgave.feedback && <span className={`block text-[13px] text-ink-soft ${open ? '' : 'line-clamp-1'}`}>{opgave.feedback}</span>}
+                                                    </span>
+                                                </button>
+                                            </td>
+                                            <td className="hidden sm:table-cell num text-right text-ink-soft">{fmt(opgave.maxPoint ?? 0)}</td>
+                                            <td className="num text-right">{fmt(opgave.givetPoint ?? 0)}</td>
+                                            <td className="text-right">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max={opgave.maxPoint}
+                                                    step="0.5"
+                                                    inputMode="decimal"
+                                                    value={tempPoints[key] !== undefined ? tempPoints[key] : dine}
+                                                    onChange={(e) => {
+                                                        if (!editMode && onStartEdit) onStartEdit();
+                                                        onUpdatePoint(index, i, e.target.value);
+                                                    }}
+                                                    className={`input num h-8 w-16 sm:w-20 text-right ml-auto ${afviger ? 'border-ink font-semibold' : ''}`}
+                                                    aria-label={`Dine point for opgave ${opgave.nummer} (maks ${opgave.maxPoint})`}
+                                                />
+                                            </td>
+                                        </tr>
+                                        {open && (
+                                            <tr>
+                                                <td colSpan={4} className="!pt-0 !px-2 sm:!px-4">
+                                                    <OpgaveDetails
+                                                        opgave={opgave}
+                                                        detailedFeedback={detailedFeedback[key]}
+                                                        onAskAI={(q, img) => onAskAIDetails(index, i, q, img)}
+                                                        onClearFeedback={() => onAskAIDetails(index, i, null, null, true)}
+                                                        loadingDetailedFeedback={loadingDetailedFeedback === key}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
+                                );
+                            })}
+                        </tbody>
+                    </table>
                 )}
             </div>
-            
-            {/* AI's Vurdering (venstre) + Lærerens Vurdering (højre) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-                {/* VENSTRE BLOK: AI's Vurdering + Karakterbegrundelse */}
-                <div className="bg-blue-50 rounded-lg p-2 border border-blue-300">
-                    <p className="text-xs text-gray-600 mb-1 font-semibold">🤖 AI's Vurdering</p>
-                    <div className="flex items-baseline gap-2 mb-2">
+
+            {/* Karakter og godkendelse */}
+            <aside className="space-y-4 lg:sticky lg:top-6">
+                <div className="surface p-5">
+                    <div className="flex items-end justify-between gap-4">
                         <div>
-                            <p className="text-xs text-gray-500">Point</p>
-                            <p className="text-lg font-bold text-blue-600">{result.totalPoint} / 75</p>
+                            <p className="text-[13px] text-ink-soft">Point</p>
+                            <p className="num text-[22px] font-semibold leading-tight">{fmt(dineTotal)} <span className="text-ink-soft font-normal text-base">/ {fmt(maxTotal)}</span></p>
                         </div>
-                        <div>
-                            <p className="text-xs text-gray-500">Karakter</p>
-                            <p className="text-lg font-bold text-blue-600">{result.karakter}</p>
+                        <div className="text-right">
+                            <p className="text-[13px] text-ink-soft mb-1">Karakter</p>
+                            <GradeMark karakter={shownKarakter} approved={approved && !editMode} size="lg" />
                         </div>
                     </div>
-                    {/* Karakterbegrundelse moved here */}
-                    {result.karakterBegrundelse && (
-                        <div className="mt-2 pt-2 border-t border-blue-300">
-                            <p className="text-xs font-semibold text-blue-900 mb-0.5">📊 Karakterbegrundelse:</p>
-                            <p className="text-blue-800 text-xs">{result.karakterBegrundelse}</p>
-                        </div>
+                    {(changed || approved) && (
+                        <p className="mt-3 text-[13px] text-ink-soft">AI foreslog {fmt(result.totalPoint ?? 0)} point og karakteren {formatKarakter(result.karakter)}.</p>
                     )}
-                </div>
-                
-                {/* HØJRE BLOK: Lærerens Vurdering */}
-                <div className="bg-amber-50 rounded-lg p-2 border border-amber-400">
-                    <p className="text-xs text-gray-600 mb-1 font-semibold">👨‍🏫 Lærerens Vurdering</p>
-                    <div className="flex items-baseline gap-2">
-                        <div>
-                            <p className="text-xs text-gray-500">Point</p>
-                            <p className="text-lg font-bold text-amber-700">
-                                {currentTotalPoint} / 75
-                            </p>
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500">Karakter</p>
-                            <p className="text-lg font-bold text-amber-700">
-                                {result.lærerKarakter !== undefined ? result.lærerKarakter : result.karakter}
-                            </p>
-                        </div>
-                    </div>
-                    <p className="text-xs text-amber-800 mt-2">
-                        {displaySource === "teacher"
-                            ? (editMode ? "Redigerer... Tryk 'Gem' for at beregne karakter" : "Lærer har rettet")
-                            : "Urettet - viser AI's vurdering"}
-                    </p>
-                </div>
-            </div>
-
-            {/* Samlet feedback - more compact */}
-            {result.samletFeedback && (
-                <div className="mb-2 p-2 bg-gray-50 rounded-lg">
-                    <p className="text-xs font-semibold text-gray-700 mb-0.5">Samlet feedback:</p>
-                    <p className="text-gray-600 text-xs">{result.samletFeedback}</p>
-                </div>
-            )}
-
-            {/* Delopgaver */}
-            {result.opgaver && result.opgaver.length > 0 ? (
-                <details className="cursor-pointer">
-                    <summary className="font-semibold text-sm text-gray-700 hover:text-indigo-600 mb-2">
-                        📋 Delopgaver ({result.opgaver.length} stk)
-                    </summary>
-                
-                {/* Save button - always visible */}
-                <div className="mb-2 p-2 bg-amber-50 border border-amber-400 rounded-lg">
-                    <p className="text-amber-900 font-semibold text-xs mb-1">✏️ Ret lærer point nedenfor</p>
-                    <p className="text-xs text-amber-800 mb-1.5">Ændringer gemmes og karakteren beregnes når du trykker "Gem"</p>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={onSaveEdit}
-                            className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded transition-colors"
-                        >
-                            ✅ Gem og beregn karakter
+                    <div className="mt-4 flex flex-col gap-2">
+                        <button type="button" className="btn-primary w-full" onClick={handleApprove} disabled={saving || (approved && !editMode)}>
+                            {saving && <Loader2 />}
+                            {approved && !editMode ? 'Godkendt' : approved ? 'Gem ændringer' : changed ? 'Godkend med dine point' : 'Godkend karakter'}
                         </button>
                         {editMode && (
-                            <button
-                                onClick={onCancelEdit}
-                                className="px-2 py-1 bg-gray-400 hover:bg-gray-500 text-white text-xs font-semibold rounded transition-colors"
-                            >
-                                ❌ Annuller
-                            </button>
+                            <button type="button" className="btn-ghost w-full" onClick={onCancelEdit}>Fortryd ændringer</button>
                         )}
                     </div>
+                    {approved && !editMode && <p className="mt-2 text-[13px] text-ok">Ret et pointtal for at ændre karakteren.</p>}
                 </div>
-                
-                    {/* Opgave list - reduced spacing */}
-                    <div className="mt-2 space-y-1.5">
-                        {result.opgaver.map((opgave, opIdx) => {
-                        const feedbackKey = `${index}-${opIdx}`;
-                        const tempKey = `${index}-${opIdx}`;
-                        
-                        return (
-                            <OpgaveDetails
-                                key={opIdx}
-                                opgave={opgave}
-                                opgaveIdx={opIdx}
-                                resultIdx={index}
-                                editMode={editMode}
-                                lærerPoint={opgave.lærerPoint}
-                                tempPoint={tempPoints[tempKey]}
-                                onUpdateTempPoint={(value) => onUpdatePoint(index, opIdx, value)}
-                                onStartEdit={onStartEdit}
-                                detailedFeedback={detailedFeedback[feedbackKey]}
-                                onAskAI={(customQuestion, imageBase64) => onAskAIDetails(index, opIdx, customQuestion, imageBase64)}
-                                onClearFeedback={() => onAskAIDetails(index, opIdx, null, null, true)}
-                                loadingDetailedFeedback={loadingDetailedFeedback === feedbackKey}
-                            />
-                        );
-                        })}
+
+                {result.advarsler?.length > 0 && (
+                    <Notice title="Tjek denne retning">
+                        <ul className="list-disc pl-4 space-y-0.5">
+                            {result.advarsler.map((a, i) => <li key={i}>{a}</li>)}
+                        </ul>
+                    </Notice>
+                )}
+
+                {(result.karakterBegrundelse || result.samletFeedback) && (
+                    <div className="text-sm space-y-3 px-1">
+                        {result.karakterBegrundelse && (
+                            <div>
+                                <p className="font-semibold">AI's vurdering</p>
+                                <p className="text-ink-soft">{result.karakterBegrundelse}</p>
+                            </div>
+                        )}
+                        {result.samletFeedback && (
+                            <div>
+                                <p className="font-semibold">Feedback til eleven</p>
+                                <p className="text-ink-soft">{result.samletFeedback}</p>
+                            </div>
+                        )}
                     </div>
-                </details>
-            ) : (
-                <div className="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <p className="text-sm text-gray-600 text-center">
-                        📋 Ingen opgavedetaljer tilgængelige
-                    </p>
-                    <p className="text-xs text-gray-500 text-center mt-1">
-                        Dette er en gammel retning uden detaljerede opgavedata
-                    </p>
-                </div>
-            )}
+                )}
+
+                {submissionPath && (
+                    <button type="button" onClick={openSubmission} className="btn-secondary w-full">
+                        Se besvarelsen <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                )}
+            </aside>
         </div>
     );
 }

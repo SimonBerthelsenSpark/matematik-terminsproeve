@@ -1,119 +1,81 @@
 /**
- * PDF to Images Converter
- * Converts PDF pages to base64-encoded images for Vision API
+ * PDF → billeder til Vision.
+ * Holder samlet størrelse under et budget, så forespørgslen ikke rammer
+ * Netlifys grænse for request-størrelse (ca. 6 MB).
  */
 
-import * as pdfjsLib from 'pdfjs-dist';
+import { loadPdfjs } from './docLibs.js';
 
-// Set worker path
-if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-}
+/** Samlet budget for alle billeder (tegn i base64 data-URL'er). */
+export const IMAGE_BUDGET_CHARS = 4.2 * 1024 * 1024;
 
 /**
- * Convert a PDF file to an array of base64-encoded images (one per page)
- * @param {File} pdfFile - The PDF file to convert
- * @param {Object} options - Conversion options
- * @param {number} options.scale - Scale factor for rendering (default: 1.5)
- * @param {number} options.maxPages - Maximum number of pages to convert (default: 10)
- * @param {string} options.format - Image format: 'png' or 'jpeg' (default: 'jpeg')
- * @param {number} options.quality - JPEG quality 0-1 (default: 0.8)
- * @returns {Promise<Array<string>>} Array of base64-encoded image data URLs
+ * Konverter en PDF til base64 JPEG-billeder (én pr. side).
+ * Hvis billederne bliver for store, sænkes kvaliteten. Til sidst stoppes der
+ * ved budgettet, så resten af siderne kun sendes som tekst.
+ * @param {File|Blob} pdfFile
+ * @param {Object} [options]
+ * @param {number} [options.scale=1.5]
+ * @param {number} [options.maxPages=10]
+ * @param {number} [options.quality=0.7]
+ * @param {number} [options.budgetChars=IMAGE_BUDGET_CHARS]
+ * @returns {Promise<{ images: string[], totalPages: number, truncated: boolean }>}
  */
 export async function convertPDFToImages(pdfFile, options = {}) {
   const {
-    scale = 0.8,        // Further reduced for speed
-    maxPages = 3,       // Only 3 pages to avoid timeout
-    format = 'jpeg',
-    quality = 0.4       // Lower quality for faster processing
+    scale = 1.5,
+    maxPages = 10,
+    quality = 0.7,
+    budgetChars = IMAGE_BUDGET_CHARS
   } = options;
 
-  console.log('🔄 Converting PDF to images...');
-  console.log('  - File:', pdfFile.name);
-  console.log('  - Scale:', scale);
-  console.log('  - Max pages:', maxPages);
-  console.log('  - Format:', format);
+  const pdfjs = await loadPdfjs();
+  const data = new Uint8Array(await pdfFile.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const numPages = Math.min(pdf.numPages, maxPages);
 
-  try {
-    // Read PDF file as ArrayBuffer
-    const arrayBuffer = await pdfFile.arrayBuffer();
-    
-    // Load PDF document
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-    
-    const numPages = Math.min(pdf.numPages, maxPages);
-    console.log(`📄 PDF has ${pdf.numPages} pages, converting ${numPages} pages`);
-    
-    const images = [];
-    
-    // Convert each page to image
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-      console.log(`  🖼️ Rendering page ${pageNum}/${numPages}...`);
-      
-      const page = await pdf.getPage(pageNum);
-      const viewport = page.getViewport({ scale });
-      
-      // Create canvas
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      
-      // Render PDF page to canvas
-      const renderContext = {
-        canvasContext: context,
-        viewport: viewport
-      };
-      
-      await page.render(renderContext).promise;
-      
-      // Convert canvas to base64 image
-      const imageFormat = format === 'png' ? 'image/png' : 'image/jpeg';
-      const imageDataUrl = canvas.toDataURL(imageFormat, quality);
-      
-      images.push(imageDataUrl);
-      
-      console.log(`  ✅ Page ${pageNum} converted (${(imageDataUrl.length / 1024).toFixed(2)} KB)`);
-      
-      // Cleanup
-      canvas.remove();
+  // Startkvalitet pr. side – sænkes hvis vi nærmer os budgettet
+  const perPageBudget = budgetChars / Math.max(1, numPages);
+
+  const images = [];
+  let total = 0;
+  let truncated = pdf.numPages > maxPages;
+
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+    let q = quality;
+    let dataUrl = canvas.toDataURL('image/jpeg', q);
+    while (dataUrl.length > perPageBudget && q > 0.35) {
+      q -= 0.1;
+      dataUrl = canvas.toDataURL('image/jpeg', q);
     }
-    
-    const totalSize = images.reduce((sum, img) => sum + img.length, 0);
-    console.log(`✅ Converted ${numPages} pages → ${(totalSize / 1024 / 1024).toFixed(2)} MB total`);
-    
-    return images;
-  } catch (error) {
-    console.error('❌ Error converting PDF to images:', error);
-    throw new Error(`PDF conversion failed: ${error.message}`);
+    canvas.width = 0;
+    canvas.height = 0;
+
+    if (total + dataUrl.length > budgetChars) {
+      truncated = true;
+      break;
+    }
+    images.push(dataUrl);
+    total += dataUrl.length;
   }
+
+  return { images, totalPages: pdf.numPages, truncated };
 }
 
 /**
- * Check if Vision API should be used based on exam settings and file type
- * @param {Object} exam - Exam object with settings
- * @param {File} file - File to check
- * @returns {boolean} True if Vision API should be used
+ * Skal Vision bruges for denne fil?
+ * @param {Object} exam - prøven (enableVision)
+ * @param {File|Blob} file
  */
 export function shouldUseVision(exam, file) {
-  // Only use Vision if enabled in exam settings
-  if (!exam?.enableVision) {
-    return false;
-  }
-  
-  // Only works with PDF files
-  if (!file || file.type !== 'application/pdf') {
-    console.log('⚠️ Vision mode is enabled but file is not PDF, using text-only');
-    return false;
-  }
-  
-  // Check file size (Vision has limits)
-  const maxSize = 20 * 1024 * 1024; // 20MB
-  if (file.size > maxSize) {
-    console.warn(`⚠️ File too large for Vision (${(file.size / 1024 / 1024).toFixed(2)} MB > 20MB), using text-only`);
-    return false;
-  }
-  
-  return true;
+  if (!exam?.enableVision) return false;
+  if (!file || file.type !== 'application/pdf') return false;
+  return file.size <= 20 * 1024 * 1024;
 }
