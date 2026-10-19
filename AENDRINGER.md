@@ -137,3 +137,24 @@ Koden er gendannet fra source map'en i deploy-zip'en. Den nye kode er bygget med
 
 - `ResultsOverview.jsx` blev importeret, men aldrig brugt. Importen er fjernet. Selve filen var ikke med i source map'en, så den ligger stadig i jeres repo.
 - `index.css` er ikke ændret og er ikke med i pakken.
+
+## AI-model og instruktioner (runde 3)
+
+- **Model:** `gpt-6.1-sol` i stedet for `gpt-4o`. Den er en ræsonnerende model, som er bedre til flertrins-matematik, og den er billigere pr. input-token ($2 mod $2,50 pr. 1M). Den kan se billeder, understøtter structured outputs og tilbyder EU-dataresidens.
+- **Parametre:** Ræsonnerende modeller bruger `max_completion_tokens` og `reasoning_effort` (standard `low` af hensyn til Netlifys tidsgrænse) i stedet for `temperature`/`max_tokens`.
+- **Reservemodel:** Afviser OpenAI modellen (400/403/404), prøves `gpt-4o` automatisk én gang.
+- **Miljøvariabler:** `OPENAI_MODEL`, `OPENAI_FALLBACK_MODEL` og `OPENAI_REASONING_EFFORT` (low/medium/high). Opstår der timeouts, kan `OPENAI_MODEL=gpt-4o` sættes i Netlify for straks at gå tilbage.
+- **Matematik-instruktioner:**
+  - følgefejl giver point
+  - ligeværdige svar accepteres (brøk/decimal/procent, komma/punktum)
+  - point for metode og ikke kun for facit
+  - enheder trækkes kun, hvis rettevejledningen kræver det
+  - samme nummerering som rettevejledningen
+  - manglende tegninger i tekstudtræk giver ikke automatisk 0
+- **Dansk-instruktioner:**
+  - 7-trinsskalaens officielle betydning
+  - begrundelse med eksempel eller citat fra teksten
+  - hvert kriterium bedømmes for sig
+  - hensyn til alderstrin
+- **Usikkerhed:** AI markerer opgaver og kriterier, hvor den er i tvivl, med en begrundelse. Det vises som "Tjek" i retningen og som "Tjek advarsel" i elevlisten.
+- **Feedback:** Feedback pr. opgave er nu skrevet til læreren (hvorfor dette pointtal). Den samlede feedback er skrevet til eleven.

@@ -42,17 +42,39 @@ describe('grade-exam', () => {
     expect(JSON.parse(res.body).error).toMatch(/for langt/);
   });
 
-  it('sender gradeMath med json_schema og temperature 0', async () => {
+  it('sender gradeMath til gpt-6.1-sol med json_schema og reasoning_effort', async () => {
     const fetchMock = vi.fn().mockResolvedValue(openaiOk(JSON.stringify({ opgaver: [], karakterBegrundelse: '', samletFeedback: '' })));
     vi.stubGlobal('fetch', fetchMock);
 
     const res = await handler(event({ task: 'gradeMath', payload: { rettevejledning: 'R', elevbesvarelse: 'E' } }));
     expect(res.statusCode).toBe(200);
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(sent.temperature).toBe(0);
+    expect(sent.model).toBe('gpt-6.1-sol');
+    expect(sent.reasoning_effort).toBe('low');
+    expect(sent.max_completion_tokens).toBeGreaterThan(10000);
+    expect(sent.temperature).toBeUndefined();
+    expect(sent.max_tokens).toBeUndefined();
     expect(sent.response_format.type).toBe('json_schema');
     expect(sent.response_format.json_schema.strict).toBe(true);
+    expect(sent.response_format.json_schema.schema.properties.opgaver.items.required).toContain('usikker');
     expect(JSON.parse(res.body).result).toEqual({ opgaver: [], karakterBegrundelse: '', samletFeedback: '' });
+  });
+
+  it('bruger temperature 0 og max_tokens for gpt-4o', () => {
+    const body = _internal.buildOpenAIBody('gpt-4o', { messages: [], maxTokens: 123, reasoningMaxTokens: 999 });
+    expect(body.temperature).toBe(0);
+    expect(body.max_tokens).toBe(123);
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it('falder tilbage til gpt-4o hvis hovedmodellen afvises', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'model not found' })
+      .mockResolvedValueOnce(openaiOk('OK'));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await handler(event({ task: 'ping' }));
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('gpt-4o');
   });
 
   it('sender billeder som image_url i Vision', async () => {
