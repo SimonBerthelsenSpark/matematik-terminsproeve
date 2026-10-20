@@ -74,6 +74,23 @@ describe('baggrundsretning', () => {
     expect(res.status).toBe(202);
   });
 
+  it('tillader eget domæne via Host-header og sitets URL', async () => {
+    delete process.env.URL;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 202 })));
+    const req = new Request('https://lovely-lolly-f39ae9.netlify.app/.netlify/functions/grade-start', {
+      method: 'POST',
+      headers: { origin: 'https://retter.example.dk', host: 'retter.example.dk', 'content-type': 'application/json' },
+      body: JSON.stringify({ task: 'ping' })
+    });
+    expect((await start(req)).status).toBe(202);
+    const req2 = new Request('https://internal.local/x', {
+      method: 'POST',
+      headers: { origin: 'https://min.skole.dk', 'content-type': 'application/json' },
+      body: JSON.stringify({ task: 'ping' })
+    });
+    expect((await start(req2, { site: { url: 'https://min.skole.dk' } })).status).toBe(202);
+  });
+
   it('afviser fremmede origins', async () => {
     const res = await start(post(`${ORIGIN}/.netlify/functions/grade-start`, { task: 'ping' }, 'https://evil.example'));
     expect(res.status).toBe(403);
