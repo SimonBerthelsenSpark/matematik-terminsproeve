@@ -30,7 +30,7 @@ export function loadMammoth() {
 /**
  * Udtræk tekst fra en PDF (File eller Blob).
  */
-export async function extractPdfText(file) {
+export async function extractPdfText(file, { pageMarkers = false } = {}) {
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await file.arrayBuffer());
   const pdf = await pdfjs.getDocument({ data }).promise;
@@ -38,6 +38,8 @@ export async function extractPdfText(file) {
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const textContent = await page.getTextContent();
+    // Sidemarkører lader AI angive, hvilken side et svar står på
+    if (pageMarkers) fullText += `[Side ${pageNum}]\n`;
     fullText += textContent.items.map(item => item.str).join(' ') + '\n\n';
   }
   return fullText.trim();

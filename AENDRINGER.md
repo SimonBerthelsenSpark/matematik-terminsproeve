@@ -176,3 +176,9 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - **Siderne sendes altid som billeder** for matematik (PDF). Indstillingen "Læs tegninger og grafer" er fjernet. Op til 20 sider; ved mere end 12 sider bruges lidt lavere opløsning, så alt holder sig under Netlifys grænse.
 - **Hver besvarelse rettes to gange uafhængigt** (parallelt). Første retning bruges som grundlag. Opgaver hvor de to retninger giver forskellige point, eller som kun findes i den ene, markeres "Tjek" med begge pointtal og den anden retnings begrundelse. Fejler den ene retning, bruges den anden med en advarsel.
 - Prisen pr. besvarelse er ca. 2 gange den hidtidige (plus billeder for prøver, hvor Vision før var slået fra).
+
+## Besvarelsen ved siden af retningen
+
+- På skærme fra 1024 px vises elevens PDF til venstre og pointene til højre, når en elev åbnes. Kan slås fra med "Skjul besvarelsen" (huskes i browseren).
+- AI angiver nu, hvilken side hvert svar står på (`side` i svaret). Siden vises ved opgaven ("s. 3"), og når opgaven åbnes, ruller PDF'en dertil og markerer siden.
+- Teksten fra elevens PDF sendes med sidemarkører ([Side N]), og billederne sendes med "Side N" foran.

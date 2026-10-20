@@ -671,6 +671,15 @@ export function MathExamGrader() {
         .sort((a, b) => (Number(elevnummerFraFil(a.r.elevNavn)) || 999) - (Number(elevnummerFraFil(b.r.elevNavn)) || 999));
 
     // Efter godkendelse: åbn næste elev, der mangler gennemsyn
+    // Elevens allerede indlæste PDF (vises ved siden af retningen)
+    const findElevFil = (r) => {
+        const files = grading.documents.elevbesvarelser || [];
+        const base = (name) => String(name || '').replace(/\.[^/.]+$/, '');
+        return files.find(f => base(f.name) === r.submissionId)
+            || files.find(f => f.name === r.fileName || base(f.name) === base(r.fileName))
+            || null;
+    };
+
     const handleApproved = async (idx) => {
         await refreshExam();
         const pos = sorted.findIndex(x => x.idx === idx);
@@ -869,6 +878,7 @@ export function MathExamGrader() {
                                                         examId={examId}
                                                         submissions={submissions}
                                                         omsaetningstabel={exam?.omsaetningstabelData}
+                                                        submissionFile={findElevFil(r)}
                                                     />
                                                 )}
                                             </div>

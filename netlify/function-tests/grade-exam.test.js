@@ -82,7 +82,9 @@ describe('grade-exam', () => {
     vi.stubGlobal('fetch', fetchMock);
     await handler(event({ task: 'gradeMath', payload: { rettevejledning: 'R', elevbesvarelse: 'E', pdfImages: ['data:image/jpeg;base64,AAAA'] } }));
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(sent.messages[1].content[1].type).toBe('image_url');
+    expect(sent.messages[1].content[1]).toEqual({ type: 'text', text: 'Side 1:' });
+    expect(sent.messages[1].content[2].type).toBe('image_url');
+    expect(sent.response_format.json_schema.schema.properties.opgaver.items.required).toContain('side');
   });
 
   it('afviser ikke-billeder i pdfImages', async () => {

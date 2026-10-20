@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
 import { convertPDFToImages, shouldUseVision } from '../utils/pdfToImages.js';
+import { extractPdfText } from '../utils/docLibs.js';
 import { callAI, fjernElevnavn, navnFraFilnavn } from '../services/aiService.js';
 import { lookupKarakter, parseOmsaetningstabel, normalizeTabel, formatKarakter } from '../utils/karakter.js';
 
@@ -28,7 +29,8 @@ export function efterbehandlMatematik(aiResult, omsaetningstabel) {
         if (opgave.usikker) {
             advarsler.push(`Opgave ${opgave.nummer}: AI er usikker${opgave.usikkerhed ? ` – ${opgave.usikkerhed}` : ''}.`);
         }
-        return { ...opgave, givetPoint, maxPoint };
+        const side = Number(opgave.side) >= 1 ? Math.round(Number(opgave.side)) : null;
+        return { ...opgave, givetPoint, maxPoint, side };
     });
 
     const totalPoint = opgaver.reduce((sum, o) => sum + o.givetPoint, 0);
@@ -284,7 +286,11 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
 
                 try {
                     setStatusMessage(`📖 Læser ${elevFile.name} (${i + 1}/${documents.elevbesvarelser.length})...`);
-                    const elevbesvarelse = await readFileContent(elevFile);
+                    // PDF-tekst med sidemarkører, så AI kan angive siden for hvert svar
+                    const erPdf = elevFile.type === 'application/pdf' || /\.pdf$/i.test(elevFile.name || '');
+                    const elevbesvarelse = erPdf
+                        ? await extractPdfText(elevFile, { pageMarkers: true })
+                        : await readFileContent(elevFile);
                     const result = await callAIForSubmission(rettevejledning, elevbesvarelse, elevFile.name, submissionId, elevFile, omsaetningstabel);
                     newlyGradedResults.push(result);
                     setResults([...existingResults, ...newlyGradedResults]);
