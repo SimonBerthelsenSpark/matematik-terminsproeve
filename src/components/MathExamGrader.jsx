@@ -15,6 +15,7 @@ import { saveGradingResult, recalculateExamStats, getGradingResults, deleteAllGr
 import { getFileDownloadURL } from '../services/storageService.js';
 import { parseDanskBedoemmelse, getCachedParsedBedoemmelse, saveParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
 import { bedoemDanskOpgave } from '../hooks/useDanskGrading.js';
+import { resultatForbrug, totalTokens, formatTokensKort, formatKr } from '../utils/usage.js';
 
 export function MathExamGrader() {
     const confirm = useConfirm();
@@ -284,6 +285,9 @@ export function MathExamGrader() {
                                     afrundetKarakter: aiGrading.afrundetKarakter || 0,
                                     karakterBegrundelse: aiGrading.karakterBegrundelse || '',
                                     lærerGrading: result.lærerGrading || null,
+                                    usage: aiGrading.usage || null,
+                                    apiCost: aiGrading.apiCost || 0,
+                                    aiModel: aiGrading.aiModel || null,
                                     id: result.id
                                 };
                             } else {
@@ -309,6 +313,9 @@ export function MathExamGrader() {
                                     karakterBegrundelse: aiGrading.karakterBegrundelse || '',
                                     samletFeedback: aiGrading.samletFeedback || '',
                                     advarsler: aiGrading.advarsler || [],
+                                    usage: aiGrading.usage || null,
+                                    apiCost: aiGrading.apiCost || 0,
+                                    aiModel: aiGrading.aiModel || null,
                                     lærerTotalPoint: result.lærerGrading?.lærerTotalPoint,
                                     lærerKarakter: result.lærerGrading?.lærerKarakter,
                                     id: result.id
@@ -431,7 +438,8 @@ export function MathExamGrader() {
                         elevbesvarelse,
                         elevFile.name,
                         submissionId,
-                        (status) => setDanskCurrentTaskPhase(status)
+                        (status) => setDanskCurrentTaskPhase(status),
+                        examId
                     );
                     
                     newlyGradedResults.push(result);
@@ -585,6 +593,7 @@ export function MathExamGrader() {
                                 aiProvider: 'openai',
                                 aiModel: result.metadata?.aiModel || 'ukendt',
                                 apiCost: result.metadata?.cost || 0,
+                                usage: result.metadata?.usage || null,
                                 processingTimeMs: 0
                             };
                         } else {
@@ -603,6 +612,7 @@ export function MathExamGrader() {
                                 aiProvider: 'openai',
                                 aiModel: result.aiModel || 'ukendt',
                                 apiCost: result.apiCost || 0,
+                                usage: result.usage || null,
                                 processingTimeMs: 0
                             };
                         }
@@ -691,7 +701,14 @@ export function MathExamGrader() {
         const vals = okResults.map(r => (isApproved(r) ? laererKarakter(r) : aiKarakter(r))).filter(v => typeof v === 'number');
         return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : null;
     })();
-    const sessionCost = (isDansk ? danskTotalCost : grading.totalCost) || 0;
+    // Forbrug for prøvens retninger (summen af de gemte besvarelser)
+    const prøveForbrug = okResults.reduce((acc, r) => {
+        const { usage, cost, harTokens } = resultatForbrug(r);
+        acc.cost += cost;
+        if (harTokens) { acc.tokens += totalTokens(usage); acc.medTokens++; }
+        if (cost || harTokens) acc.antal++;
+        return acc;
+    }, { cost: 0, tokens: 0, antal: 0, medTokens: 0 });
 
     return (
         <ExamShell
@@ -893,7 +910,15 @@ export function MathExamGrader() {
                 {grading.results.length > 0 && (
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 text-[13px] text-ink-soft">
                         <span>
-                            {sessionCost > 0 && <>AI-forbrug i denne session: ca. <span className="num">{(sessionCost * 7).toFixed(2).replace('.', ',')}</span> kr.</>}
+                            {prøveForbrug.antal > 0 && (
+                                <>
+                                    AI-forbrug for prøven:{' '}
+                                    {prøveForbrug.medTokens > 0 && <><span className="num">{formatTokensKort(prøveForbrug.tokens)}</span> tokens · </>}
+                                    ca. <span className="num">{formatKr(prøveForbrug.cost)}</span>
+                                    {prøveForbrug.antal > 1 && <> · gns. <span className="num">{formatKr(prøveForbrug.cost / prøveForbrug.antal)}</span> pr. besvarelse</>}
+                                    {' · '}<Link to="/forbrug" className="underline underline-offset-2 hover:text-ink">Se forbrug</Link>
+                                </>
+                            )}
                         </span>
                         <button type="button" className="btn-ghost btn-sm text-pen hover:text-pen" onClick={handleDeleteAllGradings} disabled={isBusy}>
                             <Trash2 className="w-3.5 h-3.5" /> Slet alle rettelser

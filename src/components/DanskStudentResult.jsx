@@ -2,6 +2,7 @@
  * Dansk: én elevs bedømmelse pr. kriterium. Læreren kan ændre delkarakterer og godkende.
  * Kriterier og vægte følger bedømmelseskemaet dynamisk.
  */
+import { BesvarelseForbrug } from './UsageInfo.jsx';
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { getSubmissions, updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
@@ -163,6 +164,8 @@ export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, s
             <p className="text-ink-soft">{result.karakterBegrundelse}</p>
           </div>
         )}
+
+        <BesvarelseForbrug result={result} />
 
         {submissionPath && (
           <button type="button" onClick={openSubmission} className="btn-secondary w-full">

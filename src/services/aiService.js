@@ -26,6 +26,15 @@ export function calculateCost(usage, model) {
   );
 }
 
+/**
+ * Registrering af forbrug sættes udefra (main.jsx), så denne fil ikke afhænger af Firebase.
+ * @type {null | ((info: { task: string, examId?: string, model: string, usage: Object, cost: number }) => any)}
+ */
+let usageRecorder = null;
+export function setUsageRecorder(fn) {
+  usageRecorder = fn;
+}
+
 export class AIError extends Error {
   constructor(message, { status, retryable = false } = {}) {
     super(message);
@@ -53,15 +62,23 @@ const JOB_TIMEOUT_MS = 15 * 60 * 1000;
  * @param {(info: {attempt:number, maxRetries:number, waitSeconds:number, reason:string}) => void} [options.onRetry]
  * @param {(secondsLeft:number) => void} [options.onWaitTick]
  * @param {(seconds:number) => void} [options.onProgress] - sekunder siden AI startede
+ * @param {string} [options.examId] - prøven forbruget registreres på
  * @returns {Promise<{ result: any, usage: Object|null, model: string, cost: number }>}
  */
 export async function callAI(task, payload, options = {}) {
-  const { maxRetries = 3, onRetry, onWaitTick, onProgress } = options;
+  const { maxRetries = 3, onRetry, onWaitTick, onProgress, examId } = options;
 
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await runJob(task, payload, onProgress);
+      const res = await runJob(task, payload, onProgress);
+      try {
+        Promise.resolve(usageRecorder?.({ task, examId, model: res.model, usage: res.usage, cost: res.cost }))
+          .catch(err => console.warn('Forbrug kunne ikke registreres:', err?.message));
+      } catch (err) {
+        console.warn('Forbrug kunne ikke registreres:', err?.message);
+      }
+      return res;
     } catch (err) {
       lastError = err;
       if (!(err instanceof AIError) || !err.retryable || attempt === maxRetries) throw err;

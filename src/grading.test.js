@@ -231,3 +231,36 @@ describe('Matematik: sidetal', () => {
     expect(res.opgaver.map(o => o.side)).toEqual([3, null]);
   });
 });
+
+import { setUsageRecorder } from './services/aiService.js';
+
+describe('Forbrug registreres', () => {
+  afterEach(() => setUsageRecorder(null));
+
+  it('sender task, prøve og usage videre efter et vellykket kald', async () => {
+    vi.useFakeTimers();
+    const usage = { prompt_tokens: 1000, completion_tokens: 200 };
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ success: true, jobId: 'j1' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ state: 'done', response: { success: true, result: {}, usage, model: 'gpt-6.1-sol' } }) }));
+    const rec = vi.fn();
+    setUsageRecorder(rec);
+    const p = callAI('explainTask', {}, { examId: 'e1' });
+    await vi.runAllTimersAsync();
+    await p;
+    expect(rec).toHaveBeenCalledWith(expect.objectContaining({ task: 'explainTask', examId: 'e1', usage, model: 'gpt-6.1-sol' }));
+    vi.useRealTimers();
+  });
+
+  it('en fejl i registreringen stopper ikke kaldet', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ success: true, jobId: 'j2' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ state: 'done', response: { success: true, result: { ok: 1 }, usage: null, model: 'm' } }) }));
+    setUsageRecorder(() => { throw new Error('offline'); });
+    const p = callAI('ping', {});
+    await vi.runAllTimersAsync();
+    expect((await p).result).toEqual({ ok: 1 });
+    vi.useRealTimers();
+  });
+});

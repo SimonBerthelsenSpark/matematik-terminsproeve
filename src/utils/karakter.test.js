@@ -148,3 +148,29 @@ describe('vægte', () => {
     expect(r.samletKarakter).toBe(10);
   });
 });
+
+import { normalizeUsage, addUsage, totalTokens, formatTokensKort, dagNoegle, resultatForbrug, formatKr } from './usage.js';
+
+describe('forbrug', () => {
+  it('normaliserer OpenAI-usage', () => {
+    expect(normalizeUsage({ prompt_tokens: 100, completion_tokens: 50, completion_tokens_details: { reasoning_tokens: 30 }, prompt_tokens_details: { cached_tokens: 10 } }))
+      .toEqual({ inputTokens: 100, outputTokens: 50, reasoningTokens: 30, cachedTokens: 10 });
+    expect(normalizeUsage(null)).toEqual({ inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedTokens: 0 });
+  });
+  it('lægger forbrug sammen', () => {
+    const s = addUsage({ calls: 1, inputTokens: 10, outputTokens: 5, cost: 0.1 }, null, { calls: 1, inputTokens: 20, cost: 0.2 });
+    expect(s.calls).toBe(2);
+    expect(totalTokens(s)).toBe(35);
+    expect(s.cost).toBeCloseTo(0.3);
+  });
+  it('formaterer', () => {
+    expect(formatTokensKort(1500)).toBe('1,5 k');
+    expect(formatTokensKort(2500000)).toBe('2,5 mio.');
+    expect(formatKr(1)).toBe('7,00 kr.');
+    expect(dagNoegle(new Date(2026, 0, 5))).toBe('2026-01-05');
+  });
+  it('håndterer gamle resultater uden tokens', () => {
+    expect(resultatForbrug({ apiCost: 0.5 })).toEqual({ usage: null, cost: 0.5, harTokens: false });
+    expect(resultatForbrug({ metadata: { usage: { inputTokens: 5, outputTokens: 5, cost: 0.01 } } }).harTokens).toBe(true);
+  });
+});

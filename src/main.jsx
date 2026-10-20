@@ -5,6 +5,11 @@ import { Toaster } from 'react-hot-toast';
 import { ExamContextProvider } from './hooks/useExamContext.jsx';
 import { ConfirmProvider } from './components/ui.jsx';
 import './index.css';
+import { setUsageRecorder } from './services/aiService.js';
+import { recordUsage } from './services/usageService.js';
+
+// Alt AI-forbrug registreres pr. dag og pr. prøve
+setUsageRecorder(recordUsage);
 
 // Siderne lazy-loades, så forsiden ikke skal hente pdf.js, mammoth m.m.
 const HomePage = lazy(() => import('./pages/HomePage.jsx').then(m => ({ default: m.HomePage })));
@@ -12,6 +17,7 @@ const CreateExamPage = lazy(() => import('./pages/CreateExamPage.jsx').then(m =>
 const EditExamPage = lazy(() => import('./pages/EditExamPage.jsx').then(m => ({ default: m.EditExamPage })));
 const StudentMatrixPage = lazy(() => import('./pages/StudentMatrixPage.jsx').then(m => ({ default: m.StudentMatrixPage })));
 const ClassesPage = lazy(() => import('./pages/ClassesPage.jsx').then(m => ({ default: m.ClassesPage })));
+const UsagePage = lazy(() => import('./pages/UsagePage.jsx').then(m => ({ default: m.UsagePage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx').then(m => ({ default: m.SettingsPage })));
 const ExamDetailPage = lazy(() => import('./pages/ExamDetailPage.jsx').then(m => ({ default: m.ExamDetailPage })));
 
@@ -51,6 +57,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/klasser" element={<ClassesPage />} />
 
           {/* Indstillinger (slet alle data) */}
+          <Route path="/forbrug" element={<UsagePage />} />
           <Route path="/indstillinger" element={<SettingsPage />} />
 
           {/* Create New Exam */}
