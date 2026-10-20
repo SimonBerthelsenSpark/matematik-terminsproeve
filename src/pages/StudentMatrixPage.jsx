@@ -9,7 +9,7 @@ import { Spinner, Notice, EmptyState, GradeMark, GradeLegend, StatusPill, useCon
 import { getAllClasses, getStudents } from '../services/classService.js';
 import { uploadStudentSubmission, getFileDownloadURL } from '../services/storageService.js';
 import { addSubmission, getSubmissions, deleteSubmission, getGradingResults } from '../services/firestoreService.js';
-import { matchFilesToStudents, checkSubmissionFile } from '../utils/matchFiles.js';
+import { matchFilesToStudents, validateSubmissionFile, PDF_HJAELP } from '../utils/matchFiles.js';
 
 /**
  * Trin 2: Besvarelser – én række pr. elev i klassen.
@@ -66,7 +66,7 @@ export function StudentMatrixPage() {
   // ---------- Upload ----------
 
   const uploadForStudent = async (student, file) => {
-    const fejl = checkSubmissionFile(file);
+    const fejl = await validateSubmissionFile(file);
     if (fejl) throw new Error(fejl);
     const ext = file.name.split('.').pop().toLowerCase();
     const fileName = `${student.studentNumber}_${student.studentName}.${ext}`;
@@ -89,17 +89,18 @@ export function StudentMatrixPage() {
       await refreshExams();
       toast.success(`Besvarelsen for ${student.studentName} er uploadet`);
     } catch (err) {
-      toast.error(`Upload mislykkedes: ${err.message}`);
+      toast.error(`${err.message}. ${/PDF/.test(err.message) ? PDF_HJAELP : ''}`.trim(), { duration: 8000 });
     } finally {
       setBusyStudentId(null);
     }
   };
 
-  const handleBulkSelect = (fileList) => {
+  const handleBulkSelect = async (fileList) => {
     const files = Array.from(fileList || []);
     if (files.length === 0) return;
-    const errors = files.map(checkSubmissionFile).filter(Boolean);
-    const valid = files.filter(f => !checkSubmissionFile(f));
+    const checks = await Promise.all(files.map(validateSubmissionFile));
+    const errors = checks.filter(Boolean);
+    const valid = files.filter((_, i) => !checks[i]);
     // Elever der allerede har en besvarelse, tages ikke med automatisk
     const ledige = students.filter(s => !submissionFor(s));
     const { matches, unmatched } = matchFilesToStudents(valid, ledige);
@@ -204,9 +205,9 @@ export function StudentMatrixPage() {
                 <span className="num">{uploadedCount}</span> af <span className="num">{students.length}</span> besvarelser uploadet
                 {missingCount > 0 && <span className="font-normal text-ink-soft">, {missingCount} mangler</span>}
               </p>
-              <p className="text-sm text-ink-soft">Træk filerne hertil, eller vælg flere på én gang. Filnavnet skal indeholde elevens navn eller nummer.</p>
+              <p className="text-sm text-ink-soft">Kun PDF-filer. Træk filerne hertil, eller vælg flere på én gang. Filnavnet skal indeholde elevens navn eller nummer.</p>
             </div>
-            <input ref={bulkInputRef} type="file" multiple accept=".pdf,.docx,.txt" className="sr-only" onChange={(e) => { handleBulkSelect(e.target.files); e.target.value = ''; }} />
+            <input ref={bulkInputRef} type="file" multiple accept=".pdf,application/pdf" className="sr-only" onChange={(e) => { handleBulkSelect(e.target.files); e.target.value = ''; }} />
             <button type="button" className="btn-secondary" onClick={() => bulkInputRef.current?.click()} disabled={missingCount === 0}>
               <Upload className="w-4 h-4" /> Upload flere filer
             </button>
@@ -255,7 +256,7 @@ export function StudentMatrixPage() {
                           ) : (
                             <label className="btn-secondary btn-sm cursor-pointer">
                               <Upload className="w-3.5 h-3.5" /> Upload
-                              <input type="file" accept=".pdf,.docx,.txt" className="sr-only" onChange={(e) => { handleSingleUpload(student, e.target.files?.[0]); e.target.value = ''; }} />
+                              <input type="file" accept=".pdf,application/pdf" className="sr-only" onChange={(e) => { handleSingleUpload(student, e.target.files?.[0]); e.target.value = ''; }} />
                             </label>
                           )}
                           </div>
@@ -271,12 +272,14 @@ export function StudentMatrixPage() {
                           ) : (
                             <label className="btn-secondary btn-sm cursor-pointer">
                               <Upload className="w-3.5 h-3.5" /> Upload
-                              <input type="file" accept=".pdf,.docx,.txt" className="sr-only" onChange={(e) => { handleSingleUpload(student, e.target.files?.[0]); e.target.value = ''; }} />
+                              <input type="file" accept=".pdf,application/pdf" className="sr-only" onChange={(e) => { handleSingleUpload(student, e.target.files?.[0]); e.target.value = ''; }} />
                             </label>
                           )}
                         </td>
                         <td>
-                          {result ? (
+                          {submission && !/\.pdf$/i.test(submission.fileName || '') && !result ? (
+                            <StatusPill tone="attention">Ikke PDF</StatusPill>
+                          ) : result ? (
                             <GradeMark karakter={karakter} approved={approved} size="sm" />
                           ) : submission ? (
                             <StatusPill>Ikke rettet</StatusPill>
@@ -341,6 +344,7 @@ function BulkPreview({ bulk, uploading, onConfirm, onCancel }) {
             </p>
           )}
           {errors.map((e, i) => <p key={i} className="text-pen">{e}</p>)}
+          {errors.length > 0 && <p className="text-ink-soft mt-1">{PDF_HJAELP}</p>}
         </div>
       )}
       <div className="mt-4 flex gap-2">
