@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchFilesToStudents, checkSubmissionFile } from './matchFiles.js';
+import { matchFilesToStudents, checkSubmissionFile, isRealPdf, validateSubmissionFile } from './matchFiles.js';
 
 const S = [
   { id: 'a', studentNumber: '1', studentName: 'Anna Jensen' },
@@ -34,9 +34,20 @@ describe('matchFilesToStudents', () => {
   });
 });
 
-describe('checkSubmissionFile', () => {
-  it('afviser forkerte filtyper', () => {
-    expect(checkSubmissionFile(f('x.doc'))).toMatch(/kun PDF/);
+describe('PDF-tjek', () => {
+  const blob = (name, text) => new File([text], name, { type: 'application/pdf' });
+  it('afviser andet end PDF', () => {
+    expect(checkSubmissionFile(f('x.docx'))).toMatch(/ikke en PDF/);
     expect(checkSubmissionFile(f('x.PDF'))).toBeNull();
+  });
+  it('genkender en rigtig PDF på indholdet', async () => {
+    expect(await isRealPdf(blob('a.pdf', '%PDF-1.7\n...'))).toBe(true);
+    expect(await validateSubmissionFile(blob('a.pdf', '%PDF-1.4 x'))).toBeNull();
+  });
+  it('afviser en omdøbt Word-fil', async () => {
+    expect(await validateSubmissionFile(blob('a.pdf', 'PK\u0003\u0004word/document.xml'))).toMatch(/ikke en rigtig PDF/);
+  });
+  it('afviser tomme filer', async () => {
+    expect(await validateSubmissionFile(blob('a.pdf', ''))).toMatch(/tom/);
   });
 });
