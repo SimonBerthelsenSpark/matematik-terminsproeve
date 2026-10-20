@@ -3,14 +3,18 @@
  * Svarer straks med 202 og et jobId, som klienten spørger på via grade-status.
  */
 import { originAllowed, validateTask } from '../lib/aiCore.js';
-import { jobStore, payloadKey, stateKey, jsonResponse } from '../lib/jobs.js';
+import { jobStore, payloadKey, stateKey, jsonResponse, siteOrigins } from '../lib/jobs.js';
 
-export default async (req) => {
+export default async (req, context) => {
   if (req.method !== 'POST') return jsonResponse(405, { success: false, error: 'Kun POST er tilladt' });
-  // Samme site er altid tilladt. Netlifys URL-variabler findes ikke altid i nye funktioner,
-  // så vi sammenligner med den adresse, forespørgslen kom ind på.
-  const selfOrigin = new URL(req.url).origin;
-  if (!originAllowed(req.headers.get('origin'), selfOrigin)) return jsonResponse(403, { success: false, error: 'Ukendt oprindelse' });
+  // Samme site er altid tilladt. Sammenlign med alle de adresser, Netlify oplyser
+  // (egen URL, Host-header, eget domæne og sitets URL-variabler).
+  const origin = req.headers.get('origin');
+  const selfOrigins = siteOrigins(req, context);
+  if (!(selfOrigins.includes(origin) || originAllowed(origin))) {
+    console.warn('Afvist origin', origin, selfOrigins);
+    return jsonResponse(403, { success: false, error: `Ukendt oprindelse (${origin || 'ingen'})` });
+  }
   if (!process.env.OPENAI_API_KEY) return jsonResponse(500, { success: false, error: 'OPENAI_API_KEY er ikke sat på serveren' });
 
   let body;
