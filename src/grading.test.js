@@ -221,3 +221,13 @@ describe('Matematik: dobbeltretning', () => {
     expect(res.advarsler.some(x => x.includes('1 og 2 point'))).toBe(true);
   });
 });
+
+describe('Matematik: sidetal', () => {
+  it('beholder gyldige sidetal og fjerner 0', () => {
+    const res = efterbehandlMatematik({ opgaver: [
+      { nummer: '1', side: 3, givetPoint: 1, maxPoint: 1 },
+      { nummer: '2', side: 0, givetPoint: 0, maxPoint: 1 }
+    ] }, [{ karakter: 2, minPoint: 0, maxPoint: 2 }]);
+    expect(res.opgaver.map(o => o.side)).toEqual([3, null]);
+  });
+});
