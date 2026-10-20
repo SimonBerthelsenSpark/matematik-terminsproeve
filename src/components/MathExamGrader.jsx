@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Loader2, Trash2, ChevronDown } from './Icons.jsx';
 import { ExamShell } from './ExamShell.jsx';
-import { Notice, EmptyState, GradeMark, GradeLegend, StatusPill, useConfirm, elevnavnFraFil, elevnummerFraFil } from './ui.jsx';
+import { Notice, EmptyState, GradeMark, GradeLegend, StatusPill, Spinner, useConfirm, elevnavnFraFil, elevnummerFraFil } from './ui.jsx';
 import { GradingProgress } from './GradingProgress.jsx';
 import { StudentResult } from './StudentResult.jsx';
 import { DanskStudentResult } from './DanskStudentResult.jsx';
@@ -19,6 +19,9 @@ import { bedoemDanskOpgave } from '../hooks/useDanskGrading.js';
 export function MathExamGrader() {
     const confirm = useConfirm();
     const [openId, setOpenId] = useState(null);
+    // Indlæsning af besvarelsesfiler fra Storage
+    const [loadingFiles, setLoadingFiles] = useState(true);
+    const [fileProblems, setFileProblems] = useState([]);
     
     // Exam context
     const { examId, exam, updateExamInContext, refreshExam } = useExamContext();
@@ -65,37 +68,30 @@ export function MathExamGrader() {
         if (!exam || !examId) return;
         
         const loadExistingFiles = async () => {
+            setLoadingFiles(true);
+            const problems = [];
             try {
-                // Load Rettevejledning if exists
-                if (exam.rettevejledningRef?.storagePath) {
-                    const url = await getFileDownloadURL(exam.rettevejledningRef.storagePath);
-                    const response = await fetch(url);
-                    const blob = await response.blob();
-                    // Create a File-like object that's compatible with production builds
-                    const file = new Blob([blob], { type: exam.rettevejledningRef.contentType });
-                    file.name = exam.rettevejledningRef.fileName;
-                    file.lastModified = Date.now();
-                    
-                    grading.setDocuments(prev => ({ ...prev, rettevejledning: file }));
-                    setUploadedFiles(prev => ({ ...prev, rettevejledning: exam.rettevejledningRef }));
-                    console.log('📄 Loaded existing rettevejledning');
-                }
-                
-                // Load Omsætningstabel if exists (MATEMATIK ONLY)
-                if (exam.omsætningstabelRef?.storagePath) {
-                    const url = await getFileDownloadURL(exam.omsætningstabelRef.storagePath);
-                    const response = await fetch(url);
-                    const blob = await response.blob();
-                    // Create a File-like object that's compatible with production builds
-                    const file = new Blob([blob], { type: exam.omsætningstabelRef.contentType });
-                    file.name = exam.omsætningstabelRef.fileName;
-                    file.lastModified = Date.now();
-                    
-                    grading.setDocuments(prev => ({ ...prev, omsætningstabel: file }));
-                    setUploadedFiles(prev => ({ ...prev, omsætningstabel: exam.omsætningstabelRef }));
-                    console.log('📄 Loaded existing omsætningstabel');
-                }
-                
+                // Hent rettevejledning og omsætningstabel hver for sig, så én fejl ikke stopper resten
+                const hentMateriale = async (ref, key, label) => {
+                    if (!ref?.storagePath) return;
+                    try {
+                        const url = await getFileDownloadURL(ref.storagePath);
+                        const response = await fetch(url);
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const blob = await response.blob();
+                        const file = new Blob([blob], { type: ref.contentType });
+                        file.name = ref.fileName;
+                        file.lastModified = Date.now();
+                        grading.setDocuments(prev => ({ ...prev, [key]: file }));
+                        setUploadedFiles(prev => ({ ...prev, [key]: ref }));
+                    } catch (err) {
+                        console.error(`${label} kunne ikke hentes:`, err);
+                        problems.push({ name: ref.fileName || label, reason: `${label.toLowerCase()} kunne ikke hentes (${err.code || err.message})` });
+                    }
+                };
+                await hentMateriale(exam.rettevejledningRef, 'rettevejledning', 'Rettevejledningen');
+                await hentMateriale(exam.omsætningstabelRef, 'omsætningstabel', 'Omsætningstabellen');
+
                 // Load Bedømmelseskema if exists (DANSK ONLY)
                 if (exam.type === 'Dansk' && exam.bedoemmelseskemaRef?.storagePath) {
                     try {
@@ -181,7 +177,7 @@ export function MathExamGrader() {
                         try {
                             // Skip if no storagePath or fileName
                             if (!submission.storagePath || !submission.fileName) {
-                                console.debug(`Submission has incomplete data, skipping:`, submission);
+                                problems.push({ name: submission.fileName || submission.id, reason: 'mangler filoplysninger' });
                                 continue;
                             }
                             
@@ -197,15 +193,18 @@ export function MathExamGrader() {
                             try {
                                 url = await getFileDownloadURL(submission.storagePath);
                             } catch (urlError) {
-                                // File doesn't exist in storage - this shouldn't happen for real uploads
-                                // but can happen if files were deleted from storage
-                                console.debug(`File not found in storage: ${submission.storagePath}, skipping`);
+                                problems.push({
+                                    name: submission.fileName,
+                                    reason: urlError.code === 'storage/object-not-found'
+                                        ? 'filen findes ikke længere i lageret'
+                                        : `filen kunne ikke findes (${urlError.code || urlError.message})`
+                                });
                                 continue;
                             }
                             
                             const response = await fetch(url);
                             if (!response.ok) {
-                                console.warn(`⚠️ Failed to fetch file ${submission.fileName}: ${response.status}`);
+                                problems.push({ name: submission.fileName, reason: `filen kunne ikke hentes (HTTP ${response.status})` });
                                 continue;
                             }
                             
@@ -217,9 +216,9 @@ export function MathExamGrader() {
                             submissionFiles.push(file);
                             console.log(`✅ Loaded submission: ${submission.fileName}`);
                         } catch (err) {
-                            // Silently skip failed submissions - don't spam console
-                            console.debug(`Skipped submission ${submission.fileName || 'unknown'}:`, err.message);
-                            // Continue processing other submissions
+                            // Typisk netværks- eller CORS-fejl ved hentning fra Firebase Storage
+                            console.error(`Besvarelsen ${submission.fileName} kunne ikke hentes:`, err);
+                            problems.push({ name: submission.fileName || 'ukendt', reason: `filen kunne ikke hentes (${err.message})` });
                         }
                     }
                     
@@ -233,6 +232,9 @@ export function MathExamGrader() {
                     }
                 }
                 
+                setFileProblems(problems);
+                setLoadingFiles(false);
+
                 // Load existing grading results from Firestore
                 console.log('📊 Loading existing grading results for exam:', examId);
                 try {
@@ -325,6 +327,9 @@ export function MathExamGrader() {
                 }
             } catch (err) {
                 console.error('Error loading existing files:', err);
+                grading.setError(`Prøvens filer kunne ikke indlæses: ${err.message}`);
+            } finally {
+                setLoadingFiles(false);
             }
         };
         
@@ -719,7 +724,23 @@ export function MathExamGrader() {
                     />
                 )}
 
-                {total === 0 && grading.results.length === 0 && (
+                {loadingFiles && total === 0 && (
+                    <div className="surface"><Spinner label="Henter besvarelser…" /></div>
+                )}
+
+                {!loadingFiles && fileProblems.length > 0 && (
+                    <Notice
+                        title={fileProblems.length === 1 ? 'En fil kunne ikke hentes' : `${fileProblems.length} filer kunne ikke hentes`}
+                        action={<Link to={`/exams/${examId}/matrix`} className="btn-secondary btn-sm self-center">Gå til besvarelser</Link>}
+                    >
+                        <ul className="list-disc pl-4">
+                            {fileProblems.map((p, i) => <li key={i}>{elevnavnFraFil(p.name) || p.name}: {p.reason}</li>)}
+                        </ul>
+                        <p className="mt-1">Slet og upload filen igen. Besvarelser ligger under Besvarelser, rettevejledning og omsætningstabel under Materiale.</p>
+                    </Notice>
+                )}
+
+                {!loadingFiles && total === 0 && grading.results.length === 0 && fileProblems.length === 0 && (
                     <div className="surface">
                         <EmptyState title="Ingen besvarelser at rette" action={<Link to={`/exams/${examId}/matrix`} className="btn-primary">Upload besvarelser</Link>}>
                             Upload elevernes besvarelser, så kan de rettes her.
