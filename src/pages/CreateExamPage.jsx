@@ -20,7 +20,7 @@ export function CreateExamPage() {
   const { createExam } = useExams();
   const { classes, loading: loadingClasses } = useClasses();
 
-  const [formData, setFormData] = useState({ beskrivelse: '', dato: '', klasse: '', type: 'Matematik', enableVision: false });
+  const [formData, setFormData] = useState({ beskrivelse: '', dato: '', klasse: '', type: 'Matematik' });
   const [customClassName, setCustomClassName] = useState('');
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +68,7 @@ export function CreateExamPage() {
     try {
       setSubmitting(true);
       const klasse = useCustomClass ? customClassName.trim() : formData.klasse;
-      const examId = await createExam({ ...formData, enableVision: formData.type === 'Matematik' && formData.enableVision, klasse, dato: new Date(formData.dato) });
+      const examId = await createExam({ ...formData, klasse, dato: new Date(formData.dato) });
 
       if (formData.type === 'Matematik') {
         await uploadOne(examId, 'rettevejledning', 'rettevejledningRef');
@@ -167,18 +167,9 @@ export function CreateExamPage() {
           </div>
 
           {formData.type === 'Matematik' && (
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.enableVision}
-                onChange={(e) => set('enableVision', e.target.checked)}
-                className="mt-1 w-4 h-4 accent-[#1E2B3A]"
-              />
-              <span>
-                <span className="block text-sm font-semibold">Læs tegninger og grafer</span>
-                <span className="block text-[13px] text-ink-soft">AI ser PDF-siderne som billeder. Mere præcist ved opgaver med tegninger, men 3–5 gange dyrere og langsommere.</span>
-              </span>
-            </label>
+            <p className="text-[13px] text-ink-soft">
+              AI ser altid besvarelsernes sider som billeder, så tegninger, grafer og håndskrift kommer med. Hver besvarelse rettes to gange uafhængigt, og opgaver hvor de to retninger er uenige, markeres "Tjek".
+            </p>
           )}
         </section>
 

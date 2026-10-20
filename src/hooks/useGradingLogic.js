@@ -47,6 +47,75 @@ export function efterbehandlMatematik(aiResult, omsaetningstabel) {
     };
 }
 
+const normNummer = (n) => String(n ?? '').toLowerCase().replace(/\s+/g, '').replace(/^opgave/, '');
+const fmtPoint = (n) => String(Number(n) || 0).replace('.', ',');
+
+/**
+ * Sammenlign to uafhængige AI-retninger af samme besvarelse.
+ * Første retning bruges som grundlag (point og feedback hænger sammen).
+ * Opgaver hvor de to retninger giver forskellige point – eller som kun findes
+ * i den ene – markeres som usikre, så læreren ser "Tjek" på dem.
+ * @returns {{ result: Object, uenigheder: number }}
+ */
+export function sammenlignRetninger(a, b) {
+    const bMap = new Map((b?.opgaver || []).map(o => [normNummer(o.nummer), o]));
+    const brugt = new Set();
+    let uenigheder = 0;
+
+    const opgaver = (a?.opgaver || []).map(opgave => {
+        const key = normNummer(opgave.nummer);
+        const anden = bMap.get(key);
+        let grund = null;
+        if (!anden) {
+            grund = 'Den anden retning fandt ikke denne opgave';
+        } else {
+            brugt.add(key);
+            const p1 = Number(opgave.givetPoint) || 0;
+            const p2 = Number(anden.givetPoint) || 0;
+            if (Math.abs(p1 - p2) > 0.01) {
+                grund = `To uafhængige retninger gav ${fmtPoint(p1)} og ${fmtPoint(p2)} point${anden.feedback ? `. Anden retning: ${anden.feedback}` : ''}`;
+            }
+        }
+        if (!grund) return { ...opgave, retning2Point: anden ? Number(anden.givetPoint) || 0 : null };
+        uenigheder++;
+        return {
+            ...opgave,
+            usikker: true,
+            usikkerhed: [grund, opgave.usikker ? opgave.usikkerhed : ''].filter(Boolean).join('. '),
+            retning2Point: anden ? Number(anden.givetPoint) || 0 : null
+        };
+    });
+
+    const kunIAnden = (b?.opgaver || []).filter(o => !brugt.has(normNummer(o.nummer)));
+    const total = (list) => list.reduce((sum, o) => sum + (Number(o.givetPoint) || 0), 0);
+
+    return {
+        result: {
+            ...a,
+            opgaver,
+            dobbeltRetning: {
+                total1: total(a?.opgaver || []),
+                total2: total(b?.opgaver || []),
+                uenigheder,
+                kunIAnden: kunIAnden.map(o => String(o.nummer))
+            }
+        },
+        uenigheder: uenigheder + kunIAnden.length
+    };
+}
+
+/** Advarsler om dobbeltretningen (tilføjes efter efterbehandlingen). */
+export function dobbeltRetningAdvarsler(dr) {
+    if (!dr) return [];
+    const out = [];
+    if (dr.enkelt) out.push(`Kun rettet én gang (anden retning fejlede: ${dr.enkelt}). Uenighed kunne ikke tjekkes.`);
+    if (dr.kunIAnden?.length) out.push(`Den anden retning fandt også opgave ${dr.kunIAnden.join(', ')}, som ikke er med her. Tjek om en opgave mangler.`);
+    if (!dr.enkelt && Math.abs(dr.total1 - dr.total2) > 0.01) {
+        out.push(`De to uafhængige retninger gav samlet ${fmtPoint(dr.total1)} og ${fmtPoint(dr.total2)} point (${dr.uenigheder} ${dr.uenigheder === 1 ? 'opgave' : 'opgaver'} med uenighed).`);
+    }
+    return out;
+}
+
 export function useGradingLogic(readFileContent, examId = null, examSettings = null) {
     const [documents, setDocuments] = useState({
         rettevejledning: null,
@@ -136,19 +205,32 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         setCurrentTaskPhase('Sender anmodning til AI...');
         setStatusMessage(`📤 Retter ${elevNavn}...`);
 
-        const { result: aiResult, cost, model } = await callAI(
-            'gradeMath',
-            { rettevejledning, elevbesvarelse: anonymTekst, pdfImages },
-            {
-                onProgress: (sek) => setCurrentTaskPhase(`AI gennemgår besvarelsen grundigt… ${sek} sek.`),
-                onRetry: (info) => setRetryInfo({ ...info, elevNavn }),
-                onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)
-            }
-        );
+        // Ret to gange uafhængigt (parallelt) og sammenlign bagefter
+        const payload = { rettevejledning, elevbesvarelse: anonymTekst, pdfImages };
+        const opts = (nr) => ({
+            onProgress: (sek) => setCurrentTaskPhase(`AI retter besvarelsen to gange uafhængigt… ${sek} sek.`),
+            onRetry: (info) => setRetryInfo({ ...info, elevNavn, retning: nr }),
+            onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)
+        });
+        const [r1, r2] = await Promise.allSettled([callAI('gradeMath', payload, opts(1)), callAI('gradeMath', payload, opts(2))]);
         setRetryInfo(null);
+
+        const ok = [r1, r2].filter(r => r.status === 'fulfilled').map(r => r.value);
+        if (!ok.length) throw r1.reason || r2.reason;
+        const cost = ok.reduce((sum, r) => sum + (r.cost || 0), 0);
+        const model = ok[0].model;
         setTotalCost(prev => prev + cost);
 
+        let aiResult;
+        if (ok.length === 2) {
+            aiResult = sammenlignRetninger(ok[0].result, ok[1].result).result;
+        } else {
+            const fejl = [r1, r2].find(r => r.status === 'rejected');
+            aiResult = { ...ok[0].result, dobbeltRetning: { enkelt: fejl?.reason?.message || 'ukendt fejl' } };
+        }
+
         const result = efterbehandlMatematik(aiResult, omsaetningstabel);
+        result.advarsler.push(...dobbeltRetningAdvarsler(aiResult.dobbeltRetning));
         if (result.advarsler.length) console.warn(`Advarsler for ${elevNavn}:`, result.advarsler);
 
         return {
