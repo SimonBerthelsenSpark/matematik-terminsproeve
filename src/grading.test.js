@@ -164,3 +164,60 @@ describe('aiService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+import { sammenlignRetninger, dobbeltRetningAdvarsler } from './hooks/useGradingLogic.js';
+
+describe('Matematik: dobbeltretning', () => {
+  const op = (nummer, givetPoint, extra = {}) => ({ nummer, givetPoint, maxPoint: 2, feedback: `fb ${nummer}`, usikker: false, usikkerhed: '', ...extra });
+
+  it('markerer opgaver hvor de to retninger er uenige', () => {
+    const a = { opgaver: [op('1.1', 2), op('1.2', 1), op('2', 0)] };
+    const b = { opgaver: [op('1.1', 2), op('1.2', 2, { feedback: 'Metode ok' }), op('2', 0)] };
+    const { result, uenigheder } = sammenlignRetninger(a, b);
+    expect(uenigheder).toBe(1);
+    expect(result.opgaver[0].usikker).toBe(false);
+    expect(result.opgaver[1].usikker).toBe(true);
+    expect(result.opgaver[1].givetPoint).toBe(1); // første retning bruges
+    expect(result.opgaver[1].usikkerhed).toContain('1 og 2 point');
+    expect(result.opgaver[1].usikkerhed).toContain('Metode ok');
+    expect(result.dobbeltRetning).toMatchObject({ total1: 3, total2: 4, uenigheder: 1 });
+  });
+
+  it('matcher opgaver på nummer uanset skrivemåde og rækkefølge', () => {
+    const a = { opgaver: [op('Opgave 1.1', 2), op('1.2', 1)] };
+    const b = { opgaver: [op('1.2', 1), op('1.1', 2)] };
+    expect(sammenlignRetninger(a, b).uenigheder).toBe(0);
+  });
+
+  it('markerer opgaver der kun findes i den ene retning', () => {
+    const a = { opgaver: [op('1', 1)] };
+    const b = { opgaver: [op('1', 1), op('2', 2)] };
+    const { result, uenigheder } = sammenlignRetninger(a, b);
+    expect(uenigheder).toBe(1);
+    expect(dobbeltRetningAdvarsler(result.dobbeltRetning).join(' ')).toContain('opgave 2');
+
+    const { result: r2 } = sammenlignRetninger(b, a);
+    expect(r2.opgaver[1].usikker).toBe(true);
+    expect(r2.opgaver[1].usikkerhed).toContain('fandt ikke');
+  });
+
+  it('bevarer AI\'ens egen usikkerhed', () => {
+    const a = { opgaver: [op('1', 1, { usikker: true, usikkerhed: 'Ulæselig' })] };
+    const b = { opgaver: [op('1', 2)] };
+    const o = sammenlignRetninger(a, b).result.opgaver[0];
+    expect(o.usikkerhed).toContain('Ulæselig');
+    expect(o.usikkerhed).toContain('1 og 2');
+  });
+
+  it('advarer når kun én retning lykkedes', () => {
+    expect(dobbeltRetningAdvarsler({ enkelt: 'timeout' })[0]).toContain('Kun rettet én gang');
+    expect(dobbeltRetningAdvarsler(undefined)).toEqual([]);
+  });
+
+  it('efterbehandlingen viser uenighed som advarsel', () => {
+    const a = { opgaver: [op('1', 1)] };
+    const b = { opgaver: [op('1', 2)] };
+    const res = efterbehandlMatematik(sammenlignRetninger(a, b).result, [{ karakter: 2, minPoint: 0, maxPoint: 2 }]);
+    expect(res.advarsler.some(x => x.includes('1 og 2 point'))).toBe(true);
+  });
+});

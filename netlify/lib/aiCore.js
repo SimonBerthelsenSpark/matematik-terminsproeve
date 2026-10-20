@@ -27,7 +27,7 @@ const LIMITS = {
   skemaTekst: 60000,
   question: 2000,
   shortField: 4000,
-  maxImages: 10,
+  maxImages: 20,
   maxImageChars: 1600000 // ca. 1,2 MB pr. billede som base64
 };
 

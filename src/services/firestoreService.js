@@ -556,6 +556,7 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
         karakterBegrundelse: gradingData.karakterBegrundelse || '',
         samletFeedback: gradingData.samletFeedback || '',
         advarsler: gradingData.advarsler || [],
+        dobbeltRetning: gradingData.dobbeltRetning || null,
         
         // AI metadata
         aiProvider: gradingData.aiProvider || 'openai',
