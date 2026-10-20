@@ -50,9 +50,10 @@ const MATH_SCHEMA = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['nummer', 'elevSvar', 'korrektSvar', 'givetPoint', 'maxPoint', 'feedback', 'usikker', 'usikkerhed'],
+          required: ['nummer', 'side', 'elevSvar', 'korrektSvar', 'givetPoint', 'maxPoint', 'feedback', 'usikker', 'usikkerhed'],
           properties: {
             nummer: { type: 'string' },
+            side: { type: 'integer' },
             elevSvar: { type: 'string' },
             korrektSvar: { type: 'string' },
             givetPoint: { type: 'number' },
@@ -168,11 +169,14 @@ function imageDataUrl(img, field) {
   return img;
 }
 
-function userContent(text, imageUrls = []) {
+function userContent(text, imageUrls = [], { pageLabels = false } = {}) {
   if (imageUrls.length === 0) return text;
   return [
     { type: 'text', text },
-    ...imageUrls.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } }))
+    ...imageUrls.flatMap((url, i) => [
+      ...(pageLabels ? [{ type: 'text', text: `Side ${i + 1}:` }] : []),
+      { type: 'image_url', image_url: { url, detail: 'high' } }
+    ])
   ];
 }
 
@@ -207,6 +211,7 @@ ${vision ? `Du får både den udtrukne tekst og billeder af siderne. Teksten kan
 6. Stavefejl og sprog påvirker ikke pointene.
 
 FELTER
+- side: sidetallet i besvarelsen, hvor elevens svar på opgaven står (teksten er markeret [Side N], og billederne kommer i siderækkefølge med "Side N" foran). Står svaret over flere sider, angiv den første. 0 hvis eleven ikke har besvaret opgaven, eller siden ikke kan afgøres.
 - elevSvar: elevens svar kort gengivet (max 1-2 linjer).
 - korrektSvar: facit eller forventet svar fra rettevejledningen.
 - feedback: til læreren – hvorfor eleven fik netop dette pointtal, og hvad der evt. blev trukket for (1-2 sætninger).
@@ -230,7 +235,7 @@ Ret nu elevbesvarelsen.`;
     return {
       messages: [
         { role: 'system', content: system },
-        { role: 'user', content: userContent(user, pdfImages) }
+        { role: 'user', content: userContent(user, pdfImages, { pageLabels: true }) }
       ],
       schema: MATH_SCHEMA,
       grading: true,
