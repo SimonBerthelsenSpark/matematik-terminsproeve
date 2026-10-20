@@ -599,6 +599,7 @@ export function MathExamGrader() {
                                 karakterBegrundelse: result.karakterBegrundelse || '',
                                 samletFeedback: result.samletFeedback || '',
                                 advarsler: result.advarsler || [],
+                                dobbeltRetning: result.dobbeltRetning || null,
                                 aiProvider: 'openai',
                                 aiModel: result.aiModel || 'ukendt',
                                 apiCost: result.apiCost || 0,

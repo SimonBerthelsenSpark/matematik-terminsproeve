@@ -119,6 +119,7 @@ export function StudentResult({
                                                             {opgave.usikker && <span className="ml-2 align-middle inline-flex h-5 px-1.5 items-center rounded-full bg-pen-soft text-pen text-[11.5px] font-semibold" title={opgave.usikkerhed || 'AI er usikker'}>Tjek</span>}
                                                         </span>
                                                         {opgave.feedback && <span className={`block text-[13px] text-ink-soft ${open ? '' : 'line-clamp-1'}`}>{opgave.feedback}</span>}
+                                                        {open && opgave.usikker && opgave.usikkerhed && <span className="block mt-1 text-[13px] text-pen">Tjek: {opgave.usikkerhed}</span>}
                                                     </span>
                                                 </button>
                                             </td>

@@ -170,3 +170,9 @@ Den ræsonnerende model gav 504-fejl, fordi en synkron Netlify-funktion ikke må
 Retningen bruger `gpt-6.1-sol` med `reasoning_effort: medium`, fordi korrekthed er vigtigere end hastighed. Det kan justeres med `OPENAI_REASONING_EFFORT`. Fælles AI-kode ligger i `netlify/lib/aiCore.js`, og `grade-exam` findes stadig som synkron reserve.
 
 Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx fordi siden blev lukket, ryddes det op efter 16 minutter, når statussen tjekkes.
+
+## Vision altid og dobbeltretning (matematik)
+
+- **Siderne sendes altid som billeder** for matematik (PDF). Indstillingen "Læs tegninger og grafer" er fjernet. Op til 20 sider; ved mere end 12 sider bruges lidt lavere opløsning, så alt holder sig under Netlifys grænse.
+- **Hver besvarelse rettes to gange uafhængigt** (parallelt). Første retning bruges som grundlag. Opgaver hvor de to retninger giver forskellige point, eller som kun findes i den ene, markeres "Tjek" med begge pointtal og den anden retnings begrundelse. Fejler den ene retning, bruges den anden med en advarsel.
+- Prisen pr. besvarelse er ca. 2 gange den hidtidige (plus billeder for prøver, hvor Vision før var slået fra).
