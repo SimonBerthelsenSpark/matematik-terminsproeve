@@ -538,6 +538,7 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
         aiProvider: gradingData.aiProvider || 'openai',
         aiModel: gradingData.aiModel || 'gpt-4o',
         apiCost: gradingData.apiCost || 0,
+        usage: gradingData.usage || null,
         processedAt: serverTimestamp(),
         processingTimeMs: gradingData.processingTimeMs || 0
       };
@@ -562,6 +563,7 @@ export async function saveGradingResult(examId, submissionId, gradingData) {
         aiProvider: gradingData.aiProvider || 'openai',
         aiModel: gradingData.aiModel || 'gpt-4o',
         apiCost: gradingData.apiCost || 0,
+        usage: gradingData.usage || null,
         processedAt: serverTimestamp(),
         processingTimeMs: gradingData.processingTimeMs || 0
       };
