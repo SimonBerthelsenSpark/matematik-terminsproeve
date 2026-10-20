@@ -18,3 +18,25 @@ export function jsonResponse(status, body) {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
+
+/** Alle adresser, som dette site kan kaldes på. */
+export function siteOrigins(req, context) {
+  const out = new Set();
+  const add = (value) => {
+    if (!value) return;
+    try {
+      out.add(new URL(value.includes('://') ? value : `https://${value}`).origin);
+    } catch {
+      // ignorer ugyldige værdier
+    }
+  };
+  add(req.url);
+  add(req.headers.get('host'));
+  add(req.headers.get('x-forwarded-host'));
+  add(context?.url?.href);
+  add(context?.site?.url);
+  const env = (name) => globalThis.Netlify?.env?.get?.(name) || process.env[name];
+  ['URL', 'DEPLOY_URL', 'DEPLOY_PRIME_URL'].forEach((k) => add(env(k)));
+  (env('ALLOWED_ORIGINS') || '').split(',').map((s) => s.trim()).forEach(add);
+  return [...out];
+}
