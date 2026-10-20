@@ -12,7 +12,9 @@ export const handler = async (event) => {
     return json(405, { success: false, error: 'Kun POST er tilladt' });
   }
   const origin = event.headers.origin || event.headers.Origin;
-  if (!originAllowed(origin)) {
+  const host = event.headers.host || event.headers.Host;
+  const selfOrigin = event.rawUrl ? new URL(event.rawUrl).origin : (host ? `https://${host}` : undefined);
+  if (!originAllowed(origin, selfOrigin)) {
     return json(403, { success: false, error: 'Ukendt oprindelse' });
   }
   let body;

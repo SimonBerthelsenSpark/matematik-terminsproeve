@@ -66,6 +66,14 @@ describe('baggrundsretning', () => {
     expect(mem.size).toBe(0);
   });
 
+  it('tillader samme site, selvom URL-variablerne mangler', async () => {
+    delete process.env.URL;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 202 })));
+    const site = 'https://lovely-lolly-f39ae9.netlify.app';
+    const res = await start(post(`${site}/.netlify/functions/grade-start`, { task: 'ping' }, site));
+    expect(res.status).toBe(202);
+  });
+
   it('afviser fremmede origins', async () => {
     const res = await start(post(`${ORIGIN}/.netlify/functions/grade-start`, { task: 'ping' }, 'https://evil.example'));
     expect(res.status).toBe(403);

@@ -392,8 +392,14 @@ function allowedOrigins() {
   ].filter(Boolean);
 }
 
-function originAllowed(origin) {
+/**
+ * Er kaldet fra en side, vi stoler på?
+ * @param {string|null} origin - Origin-headeren fra browseren
+ * @param {string} [selfOrigin] - adressen forespørgslen blev sendt til (samme site = altid ok)
+ */
+function originAllowed(origin, selfOrigin) {
   if (!origin) return false;
+  if (selfOrigin && origin === selfOrigin) return true;
   if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
   return allowedOrigins().some(allowed => origin === allowed.replace(/\/$/, ''));
 }
