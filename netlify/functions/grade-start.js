@@ -7,7 +7,10 @@ import { jobStore, payloadKey, stateKey, jsonResponse } from '../lib/jobs.js';
 
 export default async (req) => {
   if (req.method !== 'POST') return jsonResponse(405, { success: false, error: 'Kun POST er tilladt' });
-  if (!originAllowed(req.headers.get('origin'))) return jsonResponse(403, { success: false, error: 'Ukendt oprindelse' });
+  // Samme site er altid tilladt. Netlifys URL-variabler findes ikke altid i nye funktioner,
+  // så vi sammenligner med den adresse, forespørgslen kom ind på.
+  const selfOrigin = new URL(req.url).origin;
+  if (!originAllowed(req.headers.get('origin'), selfOrigin)) return jsonResponse(403, { success: false, error: 'Ukendt oprindelse' });
   if (!process.env.OPENAI_API_KEY) return jsonResponse(500, { success: false, error: 'OPENAI_API_KEY er ikke sat på serveren' });
 
   let body;
