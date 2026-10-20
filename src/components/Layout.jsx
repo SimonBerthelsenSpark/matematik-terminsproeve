@@ -23,6 +23,7 @@ export function Layout({ children, width = 'wide' }) {
           <nav className="flex gap-4 sm:gap-6" aria-label="Hovedmenu">
             <NavLink to="/" end className={navClass}>Prøver</NavLink>
             <NavLink to="/klasser" className={navClass}>Klasser</NavLink>
+            <NavLink to="/forbrug" className={navClass}>Forbrug</NavLink>
             <NavLink to="/indstillinger" className={navClass}>Indstillinger</NavLink>
           </nav>
         </div>

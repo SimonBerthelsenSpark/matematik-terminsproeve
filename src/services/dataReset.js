@@ -1,5 +1,5 @@
 /**
- * Slet ALT data: alle prøver, rettelser, besvarelser, klasser, elever og alle filer i Storage.
+ * Slet ALT data: alle prøver, rettelser, besvarelser, klasser, elever, forbrugsoversigten og alle filer i Storage.
  * Kan ikke fortrydes. Bruges kun fra siden Indstillinger.
  */
 import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
@@ -79,6 +79,10 @@ export async function deleteAllData(onProgress) {
   state.phase = 'Sletter klasser og elever…';
   report();
   await deleteCollection('classes', (n) => { state.documents += n; report(); });
+
+  state.phase = 'Sletter forbrugsoversigt…';
+  report();
+  await deleteCollection('usageDaily', (n) => { state.documents += n; report(); });
 
   state.phase = 'Færdig';
   report();

@@ -7,6 +7,7 @@
  */
 
 import { callAI, fjernElevnavn, navnFraFilnavn } from '../services/aiService.js';
+import { normalizeUsage } from '../utils/usage.js';
 import { SEVENTRIN, beregnVaegtetKarakter } from '../utils/karakter.js';
 
 /**
@@ -32,7 +33,7 @@ export function kriterieListe(parsedBedoemmelse) {
  * @param {string} submissionId
  * @param {Function} [onProgress]
  */
-export async function bedoemDanskOpgave(parsedBedoemmelse, elevbesvarelse, elevNavn, submissionId, onProgress = null) {
+export async function bedoemDanskOpgave(parsedBedoemmelse, elevbesvarelse, elevNavn, submissionId, onProgress = null, examId = undefined) {
   if (!parsedBedoemmelse?.dele?.length) {
     throw new Error('Bedømmelseskema er tomt eller ikke korrekt parsed. Kontroller at bedømmelseskemaet indeholder kriterier.');
   }
@@ -53,6 +54,7 @@ export async function bedoemDanskOpgave(parsedBedoemmelse, elevbesvarelse, elevN
 
   try {
     const { result: aiResult, usage, model, cost } = await callAI('gradeDansk', payload, {
+      examId,
       onProgress: (sek) => onProgress?.(`AI bedømmer teksten grundigt… ${sek} sek.`),
       onRetry: ({ attempt, maxRetries, waitSeconds }) =>
         onProgress?.(`AI optaget – nyt forsøg ${attempt}/${maxRetries} om ${waitSeconds} sek...`)
@@ -65,7 +67,8 @@ export async function bedoemDanskOpgave(parsedBedoemmelse, elevbesvarelse, elevN
       aiModel: model,
       promptTokens: usage?.prompt_tokens,
       completionTokens: usage?.completion_tokens,
-      cost
+      cost,
+      usage: { ...normalizeUsage(usage), calls: 1, cost }
     };
     return gradingResult;
   } catch (error) {

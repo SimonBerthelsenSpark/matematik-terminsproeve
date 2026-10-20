@@ -47,7 +47,7 @@ export function SettingsPage() {
           <h2 id="slet-alt-titel" className="text-[17px] font-semibold text-pen">Slet alle data</h2>
           <p className="mt-1 text-sm text-ink-soft max-w-prose">
             Sletter alt permanent: alle prøver, rettelser og karakterer, alle elevbesvarelser og uploadede filer,
-            samt alle klasser og elever. Det kan ikke fortrydes.
+            alle klasser og elever samt forbrugsoversigten. Det kan ikke fortrydes.
           </p>
 
           <form onSubmit={handleDelete} className="mt-5 space-y-3">

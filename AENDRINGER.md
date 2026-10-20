@@ -182,3 +182,12 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - På skærme fra 1024 px vises elevens PDF til venstre og pointene til højre, når en elev åbnes. Kan slås fra med "Skjul besvarelsen" (huskes i browseren).
 - AI angiver nu, hvilken side hvert svar står på (`side` i svaret). Siden vises ved opgaven ("s. 3"), og når opgaven åbnes, ruller PDF'en dertil og markerer siden.
 - Teksten fra elevens PDF sendes med sidemarkører ([Side N]), og billederne sendes med "Side N" foran.
+
+## Forbrug (tokens og pris)
+
+- **Alt AI-forbrug registreres** (tokens ind/ud, heraf tænkning, antal kald og anslået pris) i `usageDaily/{YYYY-MM-DD}` og på prøven (`exams/{id}.usage`). Tallene lægges til med `increment()`.
+- **Pr. besvarelse:** tokens og pris vises under karakteren (gemmes som `aiGrading.usage`). Ældre retninger viser kun prisen.
+- **Pr. prøve:** nederst på Retning ("AI-forbrug for prøven … gns. pr. besvarelse").
+- **Ny side "Forbrug"** i menuen: i dag, seneste 7 dage, denne måned og i alt, en tabel pr. dag, pr. prøve og fordelt på brug.
+- Prisen vises i kroner med en fast kurs på 7 kr. pr. dollar (`USD_TIL_DKK` i `src/utils/usage.js`) ud fra `MODEL_PRICES`.
+- "Slet alle data" sletter også forbrugsoversigten.

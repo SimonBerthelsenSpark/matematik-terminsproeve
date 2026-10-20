@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { updateTeacherGrading, recalculateExamStats } from '../services/firestoreService.js';
 import { convertPDFToImages, shouldUseVision } from '../utils/pdfToImages.js';
 import { extractPdfText } from '../utils/docLibs.js';
+import { normalizeUsage, addUsage } from '../utils/usage.js';
 import { callAI, fjernElevnavn, navnFraFilnavn } from '../services/aiService.js';
 import { lookupKarakter, parseOmsaetningstabel, normalizeTabel, formatKarakter } from '../utils/karakter.js';
 
@@ -210,6 +211,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         // Ret to gange uafhængigt (parallelt) og sammenlign bagefter
         const payload = { rettevejledning, elevbesvarelse: anonymTekst, pdfImages };
         const opts = (nr) => ({
+            examId,
             onProgress: (sek) => setCurrentTaskPhase(`AI retter besvarelsen to gange uafhængigt… ${sek} sek.`),
             onRetry: (info) => setRetryInfo({ ...info, elevNavn, retning: nr }),
             onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)
@@ -220,6 +222,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         const ok = [r1, r2].filter(r => r.status === 'fulfilled').map(r => r.value);
         if (!ok.length) throw r1.reason || r2.reason;
         const cost = ok.reduce((sum, r) => sum + (r.cost || 0), 0);
+        const usage = addUsage(...ok.map(r => ({ ...normalizeUsage(r.usage), calls: 1, cost: r.cost })));
         const model = ok[0].model;
         setTotalCost(prev => prev + cost);
 
@@ -241,7 +244,8 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
             fileName: elevNavn,
             submissionId,
             aiModel: model,
-            apiCost: cost
+            apiCost: cost,
+            usage
         };
     };
 
@@ -384,9 +388,9 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
                     question: customQuestion,
                     fullDocument,
                     imageBase64: imageBase64 || undefined
-                }, { maxRetries: 2 });
+                }, { maxRetries: 2, examId });
             } else {
-                response = await callAI('explainTask', { opgave: opgaveData }, { maxRetries: 2 });
+                response = await callAI('explainTask', { opgave: opgaveData }, { maxRetries: 2, examId });
             }
 
             setDetailedFeedback(prev => ({

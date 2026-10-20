@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, Fragment } from 'react';
 import toast from 'react-hot-toast';
 import { OpgaveDetails } from './OpgaveDetails.jsx';
 import { PdfPane } from './PdfPane.jsx';
+import { BesvarelseForbrug } from './UsageInfo.jsx';
 import { getFileDownloadURL } from '../services/storageService.js';
 import { getSubmissions } from '../services/firestoreService.js';
 import { lookupKarakter, formatKarakter } from '../utils/karakter.js';
@@ -257,6 +258,8 @@ export function StudentResult({
                         )}
                     </div>
                 )}
+
+                <BesvarelseForbrug result={result} />
 
                 {submissionPath && (
                     <button type="button" onClick={openSubmission} className={`btn-secondary w-full ${vedSiden ? 'hidden' : ''}`}>
