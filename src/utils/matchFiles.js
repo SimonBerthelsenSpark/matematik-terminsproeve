@@ -46,12 +46,35 @@ export function matchFilesToStudents(files, students) {
   return { matches, unmatched };
 }
 
-export const ACCEPTED_SUBMISSION = ['.pdf', '.docx', '.txt'];
+// Besvarelser skal være PDF – det giver den mest pålidelige retning (tekst + billeder af siderne)
+export const ACCEPTED_SUBMISSION = ['.pdf'];
 export const MAX_SUBMISSION_BYTES = 20 * 1024 * 1024;
+export const PDF_HJAELP = 'Gem filen som PDF først: I Word vælg Filer → Gem som → PDF. I Google Docs vælg Filer → Download → PDF.';
 
+/** Hurtigt tjek af filnavn og størrelse. */
 export function checkSubmissionFile(file) {
   const ext = '.' + file.name.split('.').pop().toLowerCase();
-  if (!ACCEPTED_SUBMISSION.includes(ext)) return `${file.name}: kun PDF, Word (.docx) og tekstfiler kan rettes`;
+  if (!ACCEPTED_SUBMISSION.includes(ext)) return `${file.name} er ikke en PDF`;
   if (file.size > MAX_SUBMISSION_BYTES) return `${file.name} er større end 20 MB`;
+  if (file.size === 0) return `${file.name} er tom`;
+  return null;
+}
+
+/** Er filen en rigtig PDF? Tjekker filens første bytes ("%PDF-"), ikke kun navnet. */
+export async function isRealPdf(file) {
+  try {
+    const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+    const text = String.fromCharCode(...head);
+    return text.includes('%PDF-');
+  } catch {
+    return false;
+  }
+}
+
+/** Fuldt tjek før upload. Returnerer en fejltekst eller null. */
+export async function validateSubmissionFile(file) {
+  const quick = checkSubmissionFile(file);
+  if (quick) return quick;
+  if (!(await isRealPdf(file))) return `${file.name} hedder .pdf, men er ikke en rigtig PDF`;
   return null;
 }

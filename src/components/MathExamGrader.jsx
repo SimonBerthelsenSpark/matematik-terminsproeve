@@ -183,6 +183,11 @@ export function MathExamGrader() {
                             
                             // Skip if submission was created by system (placeholder)
                             // These are submissions created during grading without actual file uploads
+                            if (!/\.pdf$/i.test(submission.fileName) && submission.uploadedBy !== 'system') {
+                                problems.push({ name: submission.fileName, reason: 'er ikke en PDF – slet den og upload den igen som PDF' });
+                                continue;
+                            }
+
                             if (submission.uploadedBy === 'system') {
                                 console.debug(`Skipping system-created placeholder submission: ${submission.fileName}`);
                                 continue;
