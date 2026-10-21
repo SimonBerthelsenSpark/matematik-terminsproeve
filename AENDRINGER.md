@@ -191,3 +191,10 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - **Ny side "Forbrug"** i menuen: i dag, seneste 7 dage, denne måned og i alt, en tabel pr. dag, pr. prøve og fordelt på brug.
 - Prisen vises i kroner med en fast kurs på 7 kr. pr. dollar (`USD_TIL_DKK` i `src/utils/usage.js`) ud fra `MODEL_PRICES`.
 - "Slet alle data" sletter også forbrugsoversigten.
+
+## Retningen fortsætter ved sideskift
+
+- Retningen registreres globalt (`src/services/gradingRuns.js`) og fortsætter, selvom læreren går til en anden side i appen. Ved tilbagekomst vises fremdriften igen, og de færdige elever er med.
+- En mørk bjælke under menuen viser "Retter … X af Y" på alle andre sider med et link tilbage til retningen.
+- Hver elev gemmes i databasen, så snart den er rettet (før skete det først til sidst), så intet går tabt, hvis noget går galt undervejs.
+- Browseren advarer, hvis man prøver at lukke eller genindlæse fanen, mens der rettes. En genindlæsning stopper retningen, men allerede rettede elever er gemt, og "Ret" fortsætter med resten.
