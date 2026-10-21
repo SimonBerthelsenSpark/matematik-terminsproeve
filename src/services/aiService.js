@@ -1,3 +1,5 @@
+import { erstatNavne } from '../utils/redact.js';
+
 /**
  * Klient til Netlify-funktionen grade-exam.
  * Klienten sender kun en opgavetype + data. Selve prompten bygges på serveren.
@@ -33,6 +35,20 @@ export function calculateCost(usage, model) {
 let usageRecorder = null;
 export function setUsageRecorder(fn) {
   usageRecorder = fn;
+}
+
+/** Giver den indloggede lærers ID-token (sættes i main.jsx). Funktionerne afviser kald uden. */
+let authTokenProvider = null;
+export function setAuthTokenProvider(fn) {
+  authTokenProvider = fn;
+}
+async function authHeaders() {
+  try {
+    const token = await authTokenProvider?.();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
 }
 
 export class AIError extends Error {
@@ -145,6 +161,7 @@ function errorFrom(status, data) {
   const message =
     data?.error ||
     (status === 413 ? 'Forespørgslen er for stor (for mange/store billeder)' : `AI-fejl (${status})`);
+  if (status === 401) return new AIError(data?.error || 'Du er ikke logget ind. Log ind igen.', { status });
   const retryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
   return new AIError(message, { status, retryable });
 }
@@ -160,7 +177,7 @@ async function runJob(task, payload, onProgress, resumeKey) {
   } else {
     const { response, data } = await fetchJson(START_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify({ task, payload })
     });
     if (response.status !== 202 || !data?.jobId) throw errorFrom(response.status, data);
@@ -175,7 +192,7 @@ async function runJob(task, payload, onProgress, resumeKey) {
 
     let r, status;
     try {
-      ({ response: r, data: status } = await fetchJson(`${STATUS_ENDPOINT}?id=${encodeURIComponent(jobId)}`));
+      ({ response: r, data: status } = await fetchJson(`${STATUS_ENDPOINT}?id=${encodeURIComponent(jobId)}`, { headers: await authHeaders() }));
     } catch {
       // Netværket var væk et øjeblik – jobbet kører videre på serveren, så prøv igen ved næste poll
       continue;
@@ -217,9 +234,6 @@ export function navnFraFilnavn(fileName) {
     .trim();
 }
 
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /**
  * Fjern elevens navn fra teksten, før den sendes til AI.
@@ -230,15 +244,5 @@ function escapeRegExp(s) {
  */
 export function fjernElevnavn(text, elevNavn) {
   if (!text || !elevNavn) return text;
-  const fuldtNavn = elevNavn.trim();
-  const dele = fuldtNavn.split(/\s+/).filter(d => d.length >= 3);
-  const kandidater = [fuldtNavn, ...dele].filter(Boolean).sort((a, b) => b.length - a.length);
-
-  let result = text;
-  for (const navn of kandidater) {
-    // Unicode-venlig ordgrænse (så "Hans" ikke rammer "Hansen")
-    const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(navn)}(?![\\p{L}\\p{N}])`, 'giu');
-    result = result.replace(re, '[ELEV]');
-  }
-  return result;
+  return erstatNavne(text, elevNavn);
 }

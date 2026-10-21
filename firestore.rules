@@ -1,0 +1,75 @@
+rules_version = '2';
+
+// AI Prøveretter – kun godkendte lærere med bekræftet e-mail, og hver lærer ser kun sine egne data.
+// Indsættes i Firebase-konsollen: Firestore Database → Regler → Udgiv.
+// Listen over faste administratorer skal svare til src/config/admins.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function isSuperAdmin() {
+      return signedIn() && myEmail() in ['s.berhelsen@gmail.com', 'simonberthelsen@hotmail.com'];
+    }
+    function approved() {
+      return signedIn() && (isSuperAdmin() || exists(/databases/$(database)/documents/brugere/$(myEmail())));
+    }
+    function isAdmin() {
+      return isSuperAdmin()
+        || (approved() && get(/databases/$(database)/documents/brugere/$(myEmail())).data.rolle == 'admin');
+    }
+    function ownsExisting() {
+      return approved() && resource.data.ownerUid == request.auth.uid;
+    }
+    function keepsOwner() {
+      return request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Godkendte lærere (dokument-id = e-mail med små bogstaver)
+    match /brugere/{email} {
+      allow get: if signedIn() && (email == myEmail() || isAdmin());
+      allow list, create, update, delete: if isAdmin();
+    }
+
+    // Prøver og alt under dem (besvarelser, rettelser)
+    match /exams/{examId} {
+      allow read, delete: if ownsExisting();
+      allow create: if approved() && keepsOwner();
+      allow update: if ownsExisting() && keepsOwner();
+
+      match /{sub=**} {
+        allow read, write: if approved()
+          && get(/databases/$(database)/documents/exams/$(examId)).data.ownerUid == request.auth.uid;
+      }
+    }
+
+    // Klasser og elever
+    match /classes/{classId} {
+      allow read, delete: if ownsExisting();
+      allow create: if approved() && keepsOwner();
+      allow update: if ownsExisting() && keepsOwner();
+
+      match /{sub=**} {
+        allow read, write: if approved()
+          && get(/databases/$(database)/documents/classes/$(classId)).data.ownerUid == request.auth.uid;
+      }
+    }
+
+    // AI-forbrug pr. lærer og dag (id = uid_ÅÅÅÅ-MM-DD). Administratorer kan se alles forbrug.
+    match /usageDaily/{id} {
+      allow read: if ownsExisting() || isAdmin();
+      allow create: if approved() && keepsOwner() && id.matches(request.auth.uid + '_.*');
+      allow update: if ownsExisting() && keepsOwner();
+      allow delete: if ownsExisting();
+    }
+
+    // Alt andet er lukket
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

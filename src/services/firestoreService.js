@@ -16,7 +16,7 @@ import {
   increment,
   Timestamp
 } from 'firebase/firestore';
-import { db } from '../config/firebase.js';
+import { db, kraevUid } from '../config/firebase.js';
 import { deleteFile, deleteStorageFolder } from './storageService.js';
 
 // ==================== EXAM OPERATIONS ====================
@@ -29,6 +29,8 @@ import { deleteFile, deleteStorageFolder } from './storageService.js';
 export async function createExam(examData) {
   try {
     const docRef = await addDoc(collection(db, 'exams'), {
+      // Prøven tilhører den indloggede lærer
+      ownerUid: kraevUid(),
       beskrivelse: examData.beskrivelse || '',
       dato: examData.dato ? Timestamp.fromDate(new Date(examData.dato)) : serverTimestamp(),
       klasse: examData.klasse || '',
@@ -104,25 +106,10 @@ export async function getAllExams(options = {}) {
       klasse = null
     } = options;
     
-    let q = query(
-      collection(db, 'exams'),
-      where('isDeleted', '==', false)
-    );
-    
-    // Add filters if provided
-    if (status) {
-      q = query(q, where('status', '==', status));
-    }
-    if (type) {
-      q = query(q, where('type', '==', type));
-    }
-    if (klasse) {
-      q = query(q, where('klasse', '==', klasse));
-    }
-    
-    // Order by creation date and limit
-    q = query(q, orderBy('createdAt', 'desc'), limit(limitCount));
-    
+    // Kun lærerens egne prøver (kræves også af sikkerhedsreglerne).
+    // Øvrige filtre og sortering sker i browseren, så der ikke kræves sammensatte indekser.
+    const q = query(collection(db, 'exams'), where('ownerUid', '==', kraevUid()));
+
     const querySnapshot = await getDocs(q);
     const exams = [];
     
@@ -132,8 +119,15 @@ export async function getAllExams(options = {}) {
         ...doc.data()
       });
     });
-    
-    return exams;
+
+    const ms = (t) => t?.toMillis?.() ?? (t ? new Date(t).getTime() : 0);
+    return exams
+      .filter(e => e.isDeleted !== true)
+      .filter(e => !status || e.status === status)
+      .filter(e => !type || e.type === type)
+      .filter(e => !klasse || e.klasse === klasse)
+      .sort((a, b) => ms(b.createdAt) - ms(a.createdAt))
+      .slice(0, limitCount);
   } catch (error) {
     console.error('Error getting all exams:', error);
     throw new Error(`Failed to get exams: ${error.message}`);

@@ -9,12 +9,13 @@ import {
   deleteDoc,
   writeBatch,
   query,
+  where,
   orderBy,
   serverTimestamp,
   increment,
   Timestamp
 } from 'firebase/firestore';
-import { db } from '../config/firebase.js';
+import { db, kraevUid } from '../config/firebase.js';
 
 // ==================== CLASS OPERATIONS ====================
 
@@ -26,6 +27,7 @@ import { db } from '../config/firebase.js';
 export async function createClass(classData) {
   try {
     const docRef = await addDoc(collection(db, 'classes'), {
+      ownerUid: kraevUid(),
       className: classData.className || '',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -45,10 +47,8 @@ export async function createClass(classData) {
  */
 export async function getAllClasses() {
   try {
-    const q = query(
-      collection(db, 'classes'),
-      orderBy('className', 'asc')
-    );
+    // Kun lærerens egne klasser; sorteres i browseren
+    const q = query(collection(db, 'classes'), where('ownerUid', '==', kraevUid()));
     
     const querySnapshot = await getDocs(q);
     const classes = [];
@@ -60,7 +60,7 @@ export async function getAllClasses() {
       });
     });
     
-    return classes;
+    return classes.sort((a, b) => String(a.className).localeCompare(String(b.className), 'da', { numeric: true }));
   } catch (error) {
     console.error('Error getting classes:', error);
     throw new Error(`Failed to get classes: ${error.message}`);

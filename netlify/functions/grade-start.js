@@ -4,6 +4,7 @@
  */
 import { originAllowed, validateTask } from '../lib/aiCore.js';
 import { jobStore, payloadKey, stateKey, jsonResponse, siteOrigins } from '../lib/jobs.js';
+import { verifyUser } from '../lib/auth.js';
 
 export default async (req, context) => {
   if (req.method !== 'POST') return jsonResponse(405, { success: false, error: 'Kun POST er tilladt' });
@@ -14,6 +15,12 @@ export default async (req, context) => {
   if (!(selfOrigins.includes(origin) || originAllowed(origin))) {
     console.warn('Afvist origin', origin, selfOrigins);
     return jsonResponse(403, { success: false, error: `Ukendt oprindelse (${origin || 'ingen'})` });
+  }
+  let user;
+  try {
+    user = await verifyUser(req.headers.get('authorization'));
+  } catch (err) {
+    return jsonResponse(err.status || 401, { success: false, error: err.message });
   }
   if (!process.env.OPENAI_API_KEY) return jsonResponse(500, { success: false, error: 'OPENAI_API_KEY er ikke sat på serveren' });
 
@@ -29,8 +36,9 @@ export default async (req, context) => {
 
   const id = crypto.randomUUID();
   const store = jobStore();
-  await store.setJSON(payloadKey(id), { task: body.task, payload: body.payload || {} });
-  await store.setJSON(stateKey(id), { state: 'queued', createdAt: Date.now() });
+  // Jobbet knyttes til læreren, så kun hun/han kan hente resultatet
+  await store.setJSON(payloadKey(id), { task: body.task, payload: body.payload || {}, uid: user.uid });
+  await store.setJSON(stateKey(id), { state: 'queued', createdAt: Date.now(), uid: user.uid });
 
   const base = new URL(req.url).origin;
   const res = await fetch(`${base}/.netlify/functions/grade-run-background`, {

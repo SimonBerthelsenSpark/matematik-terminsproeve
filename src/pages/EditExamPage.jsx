@@ -29,7 +29,7 @@ export function EditExamPage() {
   const { classes } = useClasses();
 
   const [exam, setExam] = useState(null);
-  const [formData, setFormData] = useState({ beskrivelse: '', dato: '', klasse: '', type: 'Matematik' });
+  const [formData, setFormData] = useState({ beskrivelse: '', dato: '', klasse: '', type: 'Matematik', skjulSidehoved: false });
   const [errors, setErrors] = useState({});
   const [savingInfo, setSavingInfo] = useState(false);
 
@@ -50,7 +50,8 @@ export function EditExamPage() {
       beskrivelse: current.beskrivelse || '',
       dato: current.dato ? (current.dato.toDate ? current.dato.toDate() : new Date(current.dato)).toISOString().split('T')[0] : '',
       klasse: current.klasse || '',
-      type: current.type || 'Matematik'
+      type: current.type || 'Matematik',
+      skjulSidehoved: Boolean(current.skjulSidehoved)
     });
     if (current.type === 'Dansk' && current.vaegttabel && !vaegtDirty) setVaegttabel(current.vaegttabel);
   }, [examId, exams]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -189,7 +190,8 @@ export function EditExamPage() {
         beskrivelse: formData.beskrivelse.trim(),
         klasse: formData.klasse.trim(),
         type: formData.type,
-        dato: new Date(formData.dato)
+        dato: new Date(formData.dato),
+        skjulSidehoved: formData.type === 'Matematik' && Boolean(formData.skjulSidehoved)
       });
       await refreshExams();
       toast.success('Oplysningerne er gemt');
@@ -297,6 +299,15 @@ export function EditExamPage() {
               </select>
               {!canChangeType && <p className="field-hint">Faget kan ikke ændres, når der er uploadet besvarelser.</p>}
             </div>
+            {formData.type === 'Matematik' && (
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" className="mt-1 w-4 h-4 accent-[#1E2B3A]" checked={Boolean(formData.skjulSidehoved)} onChange={(e) => setFormData(p => ({ ...p, skjulSidehoved: e.target.checked }))} />
+                <span>
+                  <span className="block text-sm font-semibold">Dæk toppen af første side</span>
+                  <span className="block text-[13px] text-ink-soft">Til håndskrevne navne. Skrevne navne dækkes altid automatisk, før siderne sendes til AI.</span>
+                </span>
+              </label>
+            )}
             <button type="submit" className="btn-secondary w-full" disabled={savingInfo}>
               {savingInfo && <Loader2 />} Gem oplysninger
             </button>

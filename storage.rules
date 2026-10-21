@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// AI Prøveretter – filer under en prøve kan kun læses og skrives af prøvens ejer.
+// Indsættes i Firebase-konsollen: Storage → Regler → Udgiv.
+// Første gang beder Firebase om lov til, at Storage-reglerne må læse Firestore – sig ja.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function approved() {
+      return signedIn() && (
+        request.auth.token.email.lower() in ['s.berhelsen@gmail.com', 'simonberthelsen@hotmail.com']
+        || firestore.exists(/databases/(default)/documents/brugere/$(request.auth.token.email.lower()))
+      );
+    }
+    function ownsExam(examId) {
+      return firestore.get(/databases/(default)/documents/exams/$(examId)).data.ownerUid == request.auth.uid;
+    }
+
+    match /exams/{examId}/{allPaths=**} {
+      // Maks 25 MB pr. fil
+      allow read, delete: if approved() && ownsExam(examId);
+      allow create, update: if approved() && ownsExam(examId) && request.resource.size < 25 * 1024 * 1024;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

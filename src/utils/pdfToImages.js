@@ -5,6 +5,7 @@
  */
 
 import { loadPdfjs } from './docLibs.js';
+import { navneKandidater, rektanglerForItem } from './redact.js';
 
 /** Samlet budget for alle billeder (tegn i base64 data-URL'er). */
 export const IMAGE_BUDGET_CHARS = 4.2 * 1024 * 1024;
@@ -22,6 +23,8 @@ export const MAX_VISION_PAGES = 20;
  * @param {number} [options.maxPages=MAX_VISION_PAGES]
  * @param {number} [options.quality=0.7]
  * @param {number} [options.budgetChars=IMAGE_BUDGET_CHARS]
+ * @param {string} [options.elevNavn] - elevens navn dækkes med sorte felter, hvor det står som tekst i PDF'en
+ * @param {boolean} [options.daekSidehoved] - dæk den øverste del af første side (til håndskrevne navne)
  * @returns {Promise<{ images: string[], totalPages: number, truncated: boolean }>}
  */
 export async function convertPDFToImages(pdfFile, options = {}) {
@@ -29,8 +32,11 @@ export async function convertPDFToImages(pdfFile, options = {}) {
     scale,
     maxPages = MAX_VISION_PAGES,
     quality = 0.7,
-    budgetChars = IMAGE_BUDGET_CHARS
+    budgetChars = IMAGE_BUDGET_CHARS,
+    elevNavn = '',
+    daekSidehoved = false
   } = options;
+  const kandidater = navneKandidater(elevNavn);
 
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await pdfFile.arrayBuffer());
@@ -52,7 +58,29 @@ export async function convertPDFToImages(pdfFile, options = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // Elevens navn må ikke sendes til AI: dæk det, hvor det står som tekst på siden
+    ctx.fillStyle = '#000';
+    if (kandidater.length) {
+      try {
+        const tekst = await page.getTextContent();
+        const maaler = document.createElement('canvas').getContext('2d');
+        maaler.font = '100px Helvetica, Arial, sans-serif';
+        const maal = (t) => maaler.measureText(t).width;
+        for (const item of tekst.items) {
+          if (!item.str) continue;
+          const m = pdfjs.Util.transform(viewport.transform, item.transform);
+          for (const r of rektanglerForItem(item, m, viewport.scale, kandidater, maal)) ctx.fillRect(r.x, r.y, r.w, r.h);
+        }
+      } catch (err) {
+        console.warn('Navne kunne ikke findes på siden:', err.message);
+      }
+    }
+    if (daekSidehoved && pageNum === 1) {
+      ctx.fillRect(0, 0, canvas.width, Math.round(canvas.height * 0.12));
+    }
 
     let q = quality;
     let dataUrl = canvas.toDataURL('image/jpeg', q);

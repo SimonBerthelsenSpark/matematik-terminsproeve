@@ -4,6 +4,7 @@ import { Layout } from '../components/Layout.jsx';
 import { PageHeader, Notice, Spinner } from '../components/ui.jsx';
 import { useExams } from '../hooks/useExams.js';
 import { getDailyUsage } from '../services/usageService.js';
+import { useAuth } from '../hooks/useAuth.jsx';
 import { addUsage, totalTokens, formatTokens, formatTokensKort, formatKr, formatUSD, dagNoegle, USD_TIL_DKK } from '../utils/usage.js';
 
 const OPGAVE_NAVNE = {
@@ -38,12 +39,16 @@ function Tal({ label, usage, hint }) {
  */
 export function UsagePage() {
   const { exams, loading: loadingExams } = useExams();
+  const { erAdmin } = useAuth();
+  const [alle, setAlle] = useState(false);
   const [dage, setDage] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    getDailyUsage().then(setDage).catch(err => setError(err.message));
-  }, []);
+    setDage(null);
+    setError(null);
+    getDailyUsage({ alle }).then(setDage).catch(err => setError(err.message));
+  }, [alle]);
 
   const overblik = useMemo(() => {
     if (!dage) return null;
@@ -76,7 +81,15 @@ export function UsagePage() {
     <Layout>
       <PageHeader
         title="Forbrug"
-        description={`AI-forbrug i tokens og anslået pris. Prisen er omregnet med ${USD_TIL_DKK} kr. pr. dollar ud fra modellens listepris, så jeres faktura kan afvige lidt.`}
+        description={`${alle ? 'Alle læreres' : 'Dit'} AI-forbrug i tokens og anslået pris. Prisen er omregnet med ${USD_TIL_DKK} kr. pr. dollar ud fra modellens listepris, så jeres faktura kan afvige lidt.`}
+        actions={erAdmin && (
+          <div className="inline-flex p-1 rounded-control bg-surface border border-line" role="group" aria-label="Vis forbrug for">
+            {[[false, 'Mit forbrug'], [true, 'Alle lærere']].map(([v, label]) => (
+              <button key={label} type="button" aria-pressed={alle === v} onClick={() => setAlle(v)}
+                className={`px-3 h-8 rounded-[5px] text-sm font-semibold ${alle === v ? 'bg-ink text-white' : 'text-ink-soft hover:text-ink'}`}>{label}</button>
+            ))}
+          </div>
+        )}
       />
 
       {error && <Notice title="Forbruget kunne ikke hentes">{error}</Notice>}
@@ -133,7 +146,7 @@ export function UsagePage() {
           </section>
 
           <section aria-labelledby="pr-proeve">
-            <h2 id="pr-proeve" className="text-[17px] font-semibold mb-3">Pr. prøve</h2>
+            <h2 id="pr-proeve" className="text-[17px] font-semibold mb-3">Pr. prøve{alle && <span className="ml-2 text-sm font-normal text-ink-soft">kun dine egne</span>}</h2>
             {loadingExams ? <Spinner /> : proever.length === 0 ? (
               <p className="text-sm text-ink-soft">Ingen prøver med registreret forbrug endnu.</p>
             ) : (

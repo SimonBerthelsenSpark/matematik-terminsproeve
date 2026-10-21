@@ -174,3 +174,26 @@ describe('forbrug', () => {
     expect(resultatForbrug({ metadata: { usage: { inputTokens: 5, outputTokens: 5, cost: 0.01 } } }).harTokens).toBe(true);
   });
 });
+
+import { navneKandidater, findNavneSpans, erstatNavne, rektanglerForItem } from './redact.js';
+
+describe('navne fjernes', () => {
+  it('finder hele navnet og navnedele, også med danske bogstaver fra translittererede filnavne', () => {
+    const k = navneKandidater('Soeren_Hansen');
+    expect(k).toEqual(expect.arrayContaining(['Soeren Hansen', 'Søren Hansen', 'Søren', 'Hansen']));
+  });
+  it('rammer kun hele ord', () => {
+    expect(findNavneSpans('Hansen og Hansensvej', navneKandidater('Bo Hansen'))).toEqual([{ start: 0, end: 6 }]);
+  });
+  it('erstatter navne i tekst', () => {
+    expect(erstatNavne('Navn: Søren Hansen. Søren svarer 12.', 'Soeren Hansen')).toBe('Navn: [ELEV]. [ELEV] svarer 12.');
+  });
+  it('beregner et felt over navnet i et tekstelement', () => {
+    // 10 tegn bredt element på 100 px, skrifthøjde 10 px, navnet står på tegn 6–10
+    const r = rektanglerForItem({ str: 'Navn: Emma', width: 100, transform: [] }, [10, 0, 0, 10, 50, 200], 1, navneKandidater('Emma Berg'));
+    expect(r).toHaveLength(1);
+    expect(r[0].x).toBeLessThan(110);
+    expect(r[0].x + r[0].w).toBeGreaterThanOrEqual(150);
+    expect(r[0].y).toBeLessThan(190);
+  });
+});

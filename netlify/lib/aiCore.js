@@ -7,10 +7,12 @@
  *   OPENAI_MODEL            (valgfri, standard "gpt-6.1-sol")
  *   OPENAI_FALLBACK_MODEL   (valgfri, standard "gpt-4o" – bruges hvis hovedmodellen afvises)
  *   OPENAI_REASONING_EFFORT (valgfri, standard "medium" for retning: low | medium | high | xhigh)
+ *   OPENAI_BASE_URL         (valgfri, standard "https://api.openai.com/v1". Sæt til "https://eu.api.openai.com/v1"
+ *                            sammen med en nøgle fra et OpenAI-projekt med europæisk dataopbevaring)
  *   ALLOWED_ORIGINS         (valgfri, kommasepareret liste. Standard: sitets egen URL + localhost)
  */
 
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const openaiUrl = () => `${(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`;
 const DEFAULT_MODEL = 'gpt-6.1-sol';
 const DEFAULT_FALLBACK_MODEL = 'gpt-4o';
 // Retning kører i baggrunden uden stram tidsgrænse, så vi prioriterer korrekthed
@@ -420,7 +422,8 @@ function json(statusCode, body) {
 
 /** Byg request-body efter modeltype. Eksporteres til tests. */
 function buildOpenAIBody(model, request) {
-  const body = { model, messages: request.messages };
+  // store: false – OpenAI må ikke gemme svaret til senere visning (elevdata)
+  const body = { model, messages: request.messages, store: false };
   if (isReasoningModel(model)) {
     body.max_completion_tokens = request.reasoningMaxTokens || 16000;
     body.reasoning_effort = request.grading
@@ -440,7 +443,7 @@ async function callOpenAI(model, request, deadline) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, deadline - Date.now()));
   try {
-    const response = await fetch(OPENAI_URL, {
+    const response = await fetch(openaiUrl(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

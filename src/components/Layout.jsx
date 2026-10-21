@@ -2,6 +2,8 @@ import React from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useActiveRuns, useInterruptedRuns, dismissInterrupted } from '../services/gradingRuns.js';
 import { Loader2 } from './Icons.jsx';
+import { useAuth } from '../hooks/useAuth.jsx';
+import { logUd } from '../services/authService.js';
 
 /**
  * Fælles ramme: smal topbar med navn og navigation.
@@ -28,12 +30,25 @@ export function Layout({ children, width = 'wide' }) {
             <NavLink to="/forbrug" className={navClass}>Forbrug</NavLink>
             <NavLink to="/indstillinger" className={navClass}>Indstillinger</NavLink>
           </nav>
+          <Konto />
         </div>
       </header>
       <RunningBar />
       <main id="main" className={`${max} mx-auto px-4 sm:px-6 py-8`}>
         {children}
       </main>
+    </div>
+  );
+}
+
+/** Indlogget lærer og log ud (skjult på små skærme – findes også under Indstillinger). */
+function Konto() {
+  const { user } = useAuth();
+  if (!user) return null;
+  return (
+    <div className="ml-auto hidden md:flex items-center gap-3 text-sm min-w-0">
+      <span className="text-ink-soft truncate max-w-[16rem]" title={user.email}>{user.email}</span>
+      <button type="button" onClick={logUd} className="text-ink-soft hover:text-ink underline underline-offset-2 shrink-0">Log ud</button>
     </div>
   );
 }
