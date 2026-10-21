@@ -218,6 +218,8 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         const payload = { rettevejledning, elevbesvarelse: anonymTekst, pdfImages };
         const opts = (nr) => ({
             examId,
+            // Genindlæses siden, hentes de igangværende retninger igen i stedet for at starte forfra
+            resumeKey: examId ? `${examId}:${submissionId}:gradeMath:${nr}` : undefined,
             onProgress: (sek) => setCurrentTaskPhase(`AI retter besvarelsen to gange uafhængigt… ${sek} sek.`),
             onRetry: (info) => setRetryInfo({ ...info, elevNavn, retning: nr }),
             onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)

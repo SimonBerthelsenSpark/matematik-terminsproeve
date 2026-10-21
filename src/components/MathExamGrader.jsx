@@ -15,7 +15,7 @@ import { saveGradingResult, recalculateExamStats, getGradingResults, deleteAllGr
 import { getFileDownloadURL } from '../services/storageService.js';
 import { parseDanskBedoemmelse, getCachedParsedBedoemmelse, saveParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
 import { bedoemDanskOpgave } from '../hooks/useDanskGrading.js';
-import { startRun, finishRun, addRunResult, updateRun, clearRun, mergeResults, useGradingRun } from '../services/gradingRuns.js';
+import { startRun, finishRun, addRunResult, updateRun, clearRun, mergeResults, useGradingRun, useInterruptedRuns, dismissInterrupted } from '../services/gradingRuns.js';
 import { resultatForbrug, totalTokens, formatTokensKort, formatKr } from '../utils/usage.js';
 
 /** Data der gemmes i gradingResults for én elev. */
@@ -435,6 +435,7 @@ export function MathExamGrader() {
             // Clear local results
             grading.setResults([]);
             clearRun(examId);
+            dismissInterrupted(examId);
             
             // Refresh exam context
             await refreshExam();
@@ -558,8 +559,10 @@ export function MathExamGrader() {
     /**
      * Enhanced grading with database persistence
      * Supports both Matematik and Dansk exams
+     * @param {Object} [options]
+     * @param {boolean} [options.resume] - fortsæt en afbrudt retning (ingen spørgsmål; kun de manglende elever)
      */
-    const handleGradeAllExams = async () => {
+    const handleGradeAllExams = async ({ resume = false } = {}) => {
         if (!examId) {
             grading.setError('Ingen eksamen valgt');
             return;
@@ -568,6 +571,12 @@ export function MathExamGrader() {
         // Check if ALL submissions are already graded
         const totalSubmissions = grading.documents.elevbesvarelser.length;
         const gradedSubmissions = okResults.length;
+
+        if (resume && gradedSubmissions >= totalSubmissions) {
+            // Alt blev færdigt, før siden blev lukket
+            dismissInterrupted(examId);
+            return;
+        }
         
         // Når alt slettes og rettes forfra, må de gamle resultater (som stadig ligger
         // i denne render's state) ikke få retningen til at springe eleverne over
@@ -665,6 +674,25 @@ export function MathExamGrader() {
     };
     
 
+    // Fortsæt automatisk en retning, der blev afbrudt af en genindlæsning eller lukket fane.
+    // Venter til besvarelser, rettelser (og for dansk bedømmelseskemaet) er indlæst.
+    const afbrudte = useInterruptedRuns();
+    const afbrudt = afbrudte.find(r => r.examId === examId);
+    const genoptaget = React.useRef(false);
+    useEffect(() => {
+        if (!afbrudt || genoptaget.current || run?.running) return;
+        if (!resultsLoaded || loadingFiles) return;
+        if (exam?.type === 'Dansk' ? !parsedBedoemmelse : !grading.canProceed()) {
+            // Materialet mangler – kan ikke fortsætte automatisk
+            dismissInterrupted(examId);
+            return;
+        }
+        genoptaget.current = true;
+        toast('Retningen fortsætter, hvor den slap');
+        handleGradeAllExams({ resume: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [afbrudt, resultsLoaded, loadingFiles, parsedBedoemmelse, run?.running, grading.documents]);
+
     // ---------- Visning ----------
 
     const isDansk = exam?.type === 'Dansk';
@@ -720,7 +748,7 @@ export function MathExamGrader() {
             actions={(ungraded > 0 || isBusy) &&
                 <button
                     type="button"
-                    onClick={handleGradeAllExams}
+                    onClick={() => handleGradeAllExams()}
                     disabled={isBusy || ungraded === 0 || !examId || (isDansk ? !parsedBedoemmelse : !grading.canProceed())}
                     className="btn-primary"
                 >

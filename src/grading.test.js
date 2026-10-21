@@ -264,3 +264,56 @@ describe('Forbrug registreres', () => {
     vi.useRealTimers();
   });
 });
+
+describe('Genoptag job efter genindlæsning', () => {
+  const lager = () => {
+    const m = new Map();
+    return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), _m: m };
+  };
+
+  it('henter et igangværende job i stedet for at starte et nyt', async () => {
+    vi.useFakeTimers();
+    const ls = lager();
+    ls.setItem('aiJob:e1:s1:gradeMath:1', JSON.stringify({ jobId: 'gammel', startedAt: Date.now() }));
+    vi.stubGlobal('localStorage', ls);
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ state: 'done', response: { success: true, result: { r: 1 }, usage: null, model: 'm' } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const p = callAI('gradeMath', {}, { resumeKey: 'e1:s1:gradeMath:1' });
+    await vi.runAllTimersAsync();
+    expect((await p).result).toEqual({ r: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('grade-status?id=gammel');
+    expect(ls._m.size).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it('starter forfra, hvis det gamle job er væk', async () => {
+    vi.useFakeTimers();
+    const ls = lager();
+    ls.setItem('aiJob:k', JSON.stringify({ jobId: 'vaek', startedAt: Date.now() }));
+    vi.stubGlobal('localStorage', ls);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ success: true, jobId: 'ny' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ state: 'done', response: { success: true, result: 2, usage: null, model: 'm' } }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const p = callAI('gradeMath', {}, { resumeKey: 'k' });
+    await vi.runAllTimersAsync();
+    expect((await p).result).toBe(2);
+    expect(fetchMock.mock.calls[1][0]).toContain('grade-start');
+    vi.useRealTimers();
+  });
+
+  it('husker jobbet mens det kører', async () => {
+    vi.useFakeTimers();
+    const ls = lager();
+    vi.stubGlobal('localStorage', ls);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 202, json: async () => ({ success: true, jobId: 'j9' }) })
+      .mockResolvedValue({ ok: true, status: 200, json: async () => ({ state: 'running' }) }));
+    callAI('gradeMath', {}, { resumeKey: 'x' }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(JSON.parse(ls.getItem('aiJob:x')).jobId).toBe('j9');
+    vi.useRealTimers();
+  });
+});

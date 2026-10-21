@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, Link, useLocation } from 'react-router-dom';
-import { useActiveRuns } from '../services/gradingRuns.js';
+import { useActiveRuns, useInterruptedRuns, dismissInterrupted } from '../services/gradingRuns.js';
 import { Loader2 } from './Icons.jsx';
 
 /**
@@ -43,9 +43,12 @@ export function Layout({ children, width = 'wide' }) {
  */
 function RunningBar() {
   const runs = useActiveRuns();
+  const afbrudte = useInterruptedRuns();
   const { pathname } = useLocation();
-  const synlige = runs.filter(r => pathname.replace(/\/$/, '') !== `/exams/${r.examId}`);
-  if (synlige.length === 0) return null;
+  const paaSiden = (examId) => pathname.replace(/\/$/, '') === `/exams/${examId}`;
+  const synlige = runs.filter(r => !paaSiden(r.examId));
+  const venter = afbrudte.filter(r => !paaSiden(r.examId) && !runs.some(x => x.examId === r.examId));
+  if (synlige.length === 0 && venter.length === 0) return null;
   return (
     <div className="bg-ink text-white" role="status" aria-live="polite">
       {synlige.map(r => (
@@ -58,7 +61,17 @@ function RunningBar() {
           <Link to={`/exams/${r.examId}`} className="ml-auto underline underline-offset-2 hover:text-white/80 shrink-0">Gå til retningen</Link>
         </div>
       ))}
-      <p className="sr-only">Retningen fortsætter, mens du bruger resten af appen. Luk ikke fanen.</p>
+      {venter.map(r => (
+        <div key={r.examId} className="max-w-6xl mx-auto px-4 sm:px-6 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <span className="min-w-0">
+            Retningen af <span className="font-semibold">{r.title}</span> blev afbrudt, da siden blev lukket. De rettede elever er gemt.
+          </span>
+          <span className="ml-auto flex items-center gap-4 shrink-0">
+            <button type="button" onClick={() => dismissInterrupted(r.examId)} className="text-white/70 hover:text-white">Fortsæt ikke</button>
+            <Link to={`/exams/${r.examId}`} className="underline underline-offset-2 hover:text-white/80">Fortsæt retningen</Link>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
