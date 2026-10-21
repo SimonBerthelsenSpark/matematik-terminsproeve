@@ -198,3 +198,10 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - En mørk bjælke under menuen viser "Retter … X af Y" på alle andre sider med et link tilbage til retningen.
 - Hver elev gemmes i databasen, så snart den er rettet (før skete det først til sidst), så intet går tabt, hvis noget går galt undervejs.
 - Browseren advarer, hvis man prøver at lukke eller genindlæse fanen, mens der rettes. En genindlæsning stopper retningen, men allerede rettede elever er gemt, og "Ret" fortsætter med resten.
+
+## Retningen fortsætter efter genindlæsning
+
+- Igangværende AI-job huskes i browseren (`aiJob:*` i localStorage, `resumeKey` i `callAI`). Genindlæses siden, hentes jobbet fra serveren i stedet for at starte forfra (serveren gemmer resultatet i ca. 16 min).
+- Den igangværende retning huskes (`aiRetning:{examId}`). Når prøven åbnes igen, fortsætter retningen automatisk med de manglende elever.
+- På andre sider vises "Retningen af … blev afbrudt" med "Fortsæt retningen" og "Fortsæt ikke".
+- Kortvarige netværksudfald under ventetiden stopper ikke længere en elev.

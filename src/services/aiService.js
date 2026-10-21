@@ -52,6 +52,29 @@ const STATUS_ENDPOINT = '/.netlify/functions/grade-status';
 const POLL_MS = 2500;
 const JOB_TIMEOUT_MS = 15 * 60 * 1000;
 
+// Igangværende job huskes i browseren, så et job kan hentes igen efter en genindlæsning.
+// Serveren gemmer resultatet i ca. 16 minutter.
+const RESUME_MAX_MS = 15 * 60 * 1000;
+const jobKey = (k) => `aiJob:${k}`;
+
+function loadJob(resumeKey) {
+  if (!resumeKey) return null;
+  try {
+    const v = JSON.parse(localStorage.getItem(jobKey(resumeKey)) || 'null');
+    if (v?.jobId && Date.now() - v.startedAt < RESUME_MAX_MS) return v;
+    localStorage.removeItem(jobKey(resumeKey));
+  } catch { /* ingen browser-lager */ }
+  return null;
+}
+function saveJob(resumeKey, jobId) {
+  if (!resumeKey) return;
+  try { localStorage.setItem(jobKey(resumeKey), JSON.stringify({ jobId, startedAt: Date.now() })); } catch { /* ignorér */ }
+}
+function forgetJob(resumeKey) {
+  if (!resumeKey) return;
+  try { localStorage.removeItem(jobKey(resumeKey)); } catch { /* ignorér */ }
+}
+
 /**
  * Kør en AI-opgave som baggrundsjob og vent på resultatet.
  * Prøver automatisk igen ved 429, 5xx og netværksfejl.
@@ -63,15 +86,18 @@ const JOB_TIMEOUT_MS = 15 * 60 * 1000;
  * @param {(secondsLeft:number) => void} [options.onWaitTick]
  * @param {(seconds:number) => void} [options.onProgress] - sekunder siden AI startede
  * @param {string} [options.examId] - prøven forbruget registreres på
+ * @param {string} [options.resumeKey] - entydig nøgle for kaldet. Afbrydes siden, hentes det
+ *   igangværende job igen ved næste kald med samme nøgle i stedet for at starte forfra.
  * @returns {Promise<{ result: any, usage: Object|null, model: string, cost: number }>}
  */
 export async function callAI(task, payload, options = {}) {
-  const { maxRetries = 3, onRetry, onWaitTick, onProgress, examId } = options;
+  const { maxRetries = 3, onRetry, onWaitTick, onProgress, examId, resumeKey } = options;
 
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await runJob(task, payload, onProgress);
+      const res = await runJob(task, payload, onProgress, resumeKey);
+      forgetJob(resumeKey);
       try {
         Promise.resolve(usageRecorder?.({ task, examId, model: res.model, usage: res.usage, cost: res.cost }))
           .catch(err => console.warn('Forbrug kunne ikke registreres:', err?.message));
@@ -81,6 +107,7 @@ export async function callAI(task, payload, options = {}) {
       return res;
     } catch (err) {
       lastError = err;
+      forgetJob(resumeKey);
       if (!(err instanceof AIError) || !err.retryable || attempt === maxRetries) throw err;
       // En timeout gentager sig typisk – prøv kun én gang mere
       if (err.isTimeout && attempt >= 1) throw err;
@@ -122,22 +149,37 @@ function errorFrom(status, data) {
   return new AIError(message, { status, retryable });
 }
 
-async function runJob(task, payload, onProgress) {
-  // 1) Start jobbet
-  const { response, data } = await fetchJson(START_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task, payload })
-  });
-  if (response.status !== 202 || !data?.jobId) throw errorFrom(response.status, data);
+async function runJob(task, payload, onProgress, resumeKey) {
+  // 1) Start jobbet – eller fortsæt et job, der blev startet før en genindlæsning
+  let jobId;
+  let started = Date.now();
+  const saved = loadJob(resumeKey);
+  if (saved) {
+    jobId = saved.jobId;
+    started = saved.startedAt;
+  } else {
+    const { response, data } = await fetchJson(START_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, payload })
+    });
+    if (response.status !== 202 || !data?.jobId) throw errorFrom(response.status, data);
+    jobId = data.jobId;
+    saveJob(resumeKey, jobId);
+  }
 
   // 2) Vent på resultatet
-  const started = Date.now();
   while (Date.now() - started < JOB_TIMEOUT_MS) {
     await sleep(POLL_MS);
     onProgress?.(Math.round((Date.now() - started) / 1000));
 
-    const { response: r, data: status } = await fetchJson(`${STATUS_ENDPOINT}?id=${encodeURIComponent(data.jobId)}`);
+    let r, status;
+    try {
+      ({ response: r, data: status } = await fetchJson(`${STATUS_ENDPOINT}?id=${encodeURIComponent(jobId)}`));
+    } catch {
+      // Netværket var væk et øjeblik – jobbet kører videre på serveren, så prøv igen ved næste poll
+      continue;
+    }
     if (r.status === 404) {
       throw new AIError('Resultatet gik tabt undervejs', { status: 404, retryable: true });
     }
