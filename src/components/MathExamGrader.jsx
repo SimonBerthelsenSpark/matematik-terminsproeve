@@ -15,7 +15,45 @@ import { saveGradingResult, recalculateExamStats, getGradingResults, deleteAllGr
 import { getFileDownloadURL } from '../services/storageService.js';
 import { parseDanskBedoemmelse, getCachedParsedBedoemmelse, saveParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
 import { bedoemDanskOpgave } from '../hooks/useDanskGrading.js';
+import { startRun, finishRun, addRunResult, updateRun, clearRun, mergeResults, useGradingRun } from '../services/gradingRuns.js';
 import { resultatForbrug, totalTokens, formatTokensKort, formatKr } from '../utils/usage.js';
+
+/** Data der gemmes i gradingResults for én elev. */
+function byggGradingData(result, type, submissionId) {
+    if (type === 'Dansk') {
+        return {
+            submissionId,
+            elevNavn: result.elevNavn,
+            fileName: result.fileName,
+            dele: result.dele || [],
+            samletKarakter: result.samletKarakter || 0,
+            afrundetKarakter: result.afrundetKarakter || 0,
+            karakterBegrundelse: result.karakterBegrundelse || '',
+            aiProvider: 'openai',
+            aiModel: result.metadata?.aiModel || 'ukendt',
+            apiCost: result.metadata?.cost || 0,
+            usage: result.metadata?.usage || null,
+            processingTimeMs: 0
+        };
+    }
+    return {
+        submissionId,
+        elevNavn: result.elevNavn,
+        fileName: result.fileName,
+        opgaver: result.opgaver || [],
+        totalPoint: result.totalPoint || 0,
+        karakter: result.karakter || 0,
+        karakterBegrundelse: result.karakterBegrundelse || '',
+        samletFeedback: result.samletFeedback || '',
+        advarsler: result.advarsler || [],
+        dobbeltRetning: result.dobbeltRetning || null,
+        aiProvider: 'openai',
+        aiModel: result.aiModel || 'ukendt',
+        apiCost: result.apiCost || 0,
+        usage: result.usage || null,
+        processingTimeMs: 0
+    };
+}
 
 export function MathExamGrader() {
     const confirm = useConfirm();
@@ -42,6 +80,25 @@ export function MathExamGrader() {
     const fileParsing = useFileParsing();
     const grading = useGradingLogic(fileParsing.readFileContent, examId, exam);
     
+    // Global retning for prøven (overlever sideskift)
+    const run = useGradingRun(examId);
+    const [resultsLoaded, setResultsLoaded] = useState(false);
+
+    // Resultater fra en retning, der kørte (eller kører) mens siden var lukket, flettes ind
+    useEffect(() => {
+        if (!resultsLoaded || !run?.results?.length) return;
+        grading.setResults(prev => mergeResults(prev, run.results));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resultsLoaded, run?.results]);
+
+    // Når en retning bliver færdig, opdateres prøvens tal
+    const varIgang = React.useRef(Boolean(run?.running));
+    useEffect(() => {
+        if (varIgang.current && !run?.running) refreshExam?.().catch?.(() => {});
+        varIgang.current = Boolean(run?.running);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [run?.running]);
+
     // Resultater uden fejl – bruges til tællere og statistik, så fejlede retninger kan prøves igen
     const okResults = grading.results.filter(r => !r.error);
     
@@ -58,8 +115,10 @@ export function MathExamGrader() {
     const [parsedBedoemmelse, setParsedBedoemmelse] = useState(null);
     const [parsingBedoemmelse, setParsingBedoemmelse] = useState(false);
     const [danskGrading, setDanskGrading] = useState(false);
-    const [danskStatusMessage, setDanskStatusMessage] = useState('');
-    const [danskCurrentTaskPhase, setDanskCurrentTaskPhase] = useState('');
+    const [danskStatusMessage, setDanskStatusMessageLocal] = useState('');
+    const [danskCurrentTaskPhase, setDanskCurrentTaskPhaseLocal] = useState('');
+    const setDanskStatusMessage = (message) => { setDanskStatusMessageLocal(message); updateRun(examId, { message }); };
+    const setDanskCurrentTaskPhase = (phase) => { setDanskCurrentTaskPhaseLocal(phase); updateRun(examId, { phase }); };
     const [danskTotalCost, setDanskTotalCost] = useState(0);
     
     /**
@@ -342,6 +401,7 @@ export function MathExamGrader() {
                 grading.setError(`Prøvens filer kunne ikke indlæses: ${err.message}`);
             } finally {
                 setLoadingFiles(false);
+                setResultsLoaded(true);
             }
         };
         
@@ -374,6 +434,7 @@ export function MathExamGrader() {
             
             // Clear local results
             grading.setResults([]);
+            clearRun(examId);
             
             // Refresh exam context
             await refreshExam();
@@ -390,7 +451,7 @@ export function MathExamGrader() {
      * Grade Dansk exams using dynamic bedømmelseskema
      * Returns the newly graded results array
      */
-    const handleGradeDanskExams = async ({ ignoreExisting = false } = {}) => {
+    const handleGradeDanskExams = async ({ ignoreExisting = false, onResult } = {}) => {
         if (!parsedBedoemmelse) {
             grading.setError('Bedømmelseskema ikke parsed endnu. Upload bedømmelseskema først.');
             return [];
@@ -424,6 +485,7 @@ export function MathExamGrader() {
                 }
                 
                 try {
+                    updateRun(examId, { current: elevFile.name });
                     setDanskStatusMessage(`📖 Læser ${elevFile.name} (${i + 1}/${grading.documents.elevbesvarelser.length})...`);
                     const elevbesvarelse = await fileParsing.readFileContent(elevFile);
                     
@@ -444,6 +506,7 @@ export function MathExamGrader() {
                     
                     newlyGradedResults.push(result);
                     grading.setResults([...existingResults, ...newlyGradedResults]);
+                    await onResult?.(result);
                     
                     // Update cost if available
                     if (result.metadata?.cost) {
@@ -459,13 +522,15 @@ export function MathExamGrader() {
                     }
                 } catch (err) {
                     console.error(`Fejl ved bedømmelse af ${elevFile.name}:`, err);
-                    newlyGradedResults.push({
+                    const fejl = {
                         submissionId,
                         fileName: elevFile.name,
                         elevNavn: elevFile.name,
                         error: err.message
-                    });
+                    };
+                    newlyGradedResults.push(fejl);
                     grading.setResults([...existingResults, ...newlyGradedResults]);
+                    await onResult?.(fejl);
                 }
             }
             
@@ -536,132 +601,69 @@ export function MathExamGrader() {
         
         // Store the count of results before grading
         const resultsBeforeGrading = ignoreExisting ? 0 : okResults.length;
-        
-        // Branch based on exam type and get new results
-        let newResults = [];
-        if (exam?.type === 'Dansk') {
-            // DANSK GRADING FLOW - returns newly graded results
-            newResults = await handleGradeDanskExams({ ignoreExisting });
-        } else {
-            // MATEMATIK GRADING FLOW (original logic)
-            if (!grading.canProceed()) {
-                grading.setError('Upload alle nødvendige dokumenter');
-                return;
-            }
-            // ✅ gradeAllExams now returns the newly graded results
-            newResults = await grading.gradeAllExams({ ignoreExisting });
+
+        if (exam?.type !== 'Dansk' && !grading.canProceed()) {
+            grading.setError('Upload alle nødvendige dokumenter');
+            return;
         }
-        
-        if (newResults.length > 0) {
+
+        // Retningen registreres globalt, så den fortsætter ved sideskift i appen
+        clearRun(examId);
+        if (!startRun(examId, { title: exam?.beskrivelse || 'Prøve', type: exam?.type, total: Math.max(1, totalSubmissions - resultsBeforeGrading) })) {
+            toast('Prøven er allerede ved at blive rettet');
+            return;
+        }
+
+        // Hvert resultat gemmes, så snart det er klar
+        const gemt = { antal: 0, fejl: 0 };
+        const onResult = async (result) => {
+            addRunResult(examId, result);
+            if (result.error) { gemt.fejl++; return; }
             try {
-                setUploadStatus(`💾 Gemmer ${newResults.length} nye resultater til database...`);
-                
-                let savedCount = 0;
-                let errorCount = 0;
-                
-                // Save ONLY the new results to gradingResults subcollection
-                for (const result of newResults) {
-                    if (result.error) {
-                        errorCount++;
-                        console.warn(`⚠️ Skipping failed grading for: ${result.fileName || result.elevNavn}`);
-                        continue;
-                    }
-                    
-                    try {
-                        // ✅ KORREKT: Brug submissionId som allerede er sat i result
-                        const submissionId = result.submissionId || result.fileName?.replace(/\.[^/.]+$/, '');
-                        
-                        if (!submissionId) {
-                            console.error(`❌ Missing submissionId for result:`, result);
-                            errorCount++;
-                            continue;
-                        }
-                        
-                        // Prepare grading data - different structure for Matematik vs Dansk
-                        let gradingData;
-                        
-                        if (exam?.type === 'Dansk') {
-                            // Dansk: Save dele structure
-                            gradingData = {
-                                submissionId: submissionId,
-                                elevNavn: result.elevNavn,
-                                fileName: result.fileName,
-                                dele: result.dele || [],
-                                samletKarakter: result.samletKarakter || 0,
-                                afrundetKarakter: result.afrundetKarakter || 0,
-                                karakterBegrundelse: result.karakterBegrundelse || '',
-                                aiProvider: 'openai',
-                                aiModel: result.metadata?.aiModel || 'ukendt',
-                                apiCost: result.metadata?.cost || 0,
-                                usage: result.metadata?.usage || null,
-                                processingTimeMs: 0
-                            };
-                        } else {
-                            // Matematik: Save opgaver structure (original)
-                            gradingData = {
-                                submissionId: submissionId,
-                                elevNavn: result.elevNavn,
-                                fileName: result.fileName,
-                                opgaver: result.opgaver || [],
-                                totalPoint: result.totalPoint || 0,
-                                karakter: result.karakter || 0,
-                                karakterBegrundelse: result.karakterBegrundelse || '',
-                                samletFeedback: result.samletFeedback || '',
-                                advarsler: result.advarsler || [],
-                                dobbeltRetning: result.dobbeltRetning || null,
-                                aiProvider: 'openai',
-                                aiModel: result.aiModel || 'ukendt',
-                                apiCost: result.apiCost || 0,
-                                usage: result.usage || null,
-                                processingTimeMs: 0
-                            };
-                        }
-                        
-                        // Save to gradingResults subcollection (this will auto-create submission if needed)
-                        await saveGradingResult(examId, submissionId, gradingData);
-                        
-                        savedCount++;
-                        console.log(`💾 Saved result for: ${submissionId} (elevNavn: ${result.elevNavn})`);
-                    } catch (saveError) {
-                        errorCount++;
-                        console.error(`❌ Failed to save result for ${result.submissionId || result.elevNavn}:`, saveError);
-                        // Continue with next result instead of stopping
-                    }
-                }
-                
-                console.log(`📊 Saved ${savedCount} out of ${newResults.length} NEW results to gradingResults subcollection`);
-                
-                // Recalculate exam statistics (only if we saved at least one result)
-                if (savedCount > 0) {
-                    setUploadStatus('📊 Opdaterer statistik...');
-                    try {
-                        await recalculateExamStats(examId);
-                        
-                        // Refresh exam context to show updated stats
-                        await refreshExam();
-                        
-                        setUploadStatus(`✅ ${savedCount} nye resultater gemt!${errorCount > 0 ? ` (${errorCount} fejlede – tryk "Ret" igen for at prøve dem igen)` : ''}`);
-                    } catch (statsError) {
-                        console.error('Error updating stats:', statsError);
-                        setUploadStatus(`✅ ${savedCount} resultater gemt! (Kunne ikke opdatere statistik)`);
-                    }
-                } else {
-                    setUploadStatus('⚠️ Ingen resultater kunne gemmes');
-                }
-                
-                setTimeout(() => setUploadStatus(''), 5000);
-            } catch (err) {
-                console.error('Error saving results to database:', err);
-                grading.setError(`Resultater rettet, men fejl ved gemning: ${err.message}`);
+                const submissionId = result.submissionId || result.fileName?.replace(/\.[^/.]+$/, '');
+                if (!submissionId) throw new Error('Mangler submissionId');
+                await saveGradingResult(examId, submissionId, byggGradingData(result, exam?.type, submissionId));
+                gemt.antal++;
+            } catch (saveError) {
+                gemt.fejl++;
+                console.error(`Resultatet for ${result.elevNavn} kunne ikke gemmes:`, saveError);
             }
-        } else if (resultsBeforeGrading > 0) {
-            // All submissions were already graded
-            setUploadStatus('ℹ️ Ingen nye rettelser - alle er allerede rettet!');
-            setTimeout(() => setUploadStatus(''), 3000);
+        };
+
+        let newResults = [];
+        try {
+            newResults = exam?.type === 'Dansk'
+                ? await handleGradeDanskExams({ ignoreExisting, onResult })
+                : await grading.gradeAllExams({ ignoreExisting, onResult });
+        } catch (err) {
+            grading.setError(err.message);
         }
+        
+        // Resultaterne er gemt løbende (onResult). Her opdateres kun statistikken.
+        const savedCount = gemt.antal;
+        const errorCount = gemt.fejl;
+        let summary;
+        if (newResults.length === 0 && resultsBeforeGrading > 0) {
+            summary = 'Ingen nye rettelser – alle er allerede rettet.';
+        } else if (savedCount > 0) {
+            try {
+                await recalculateExamStats(examId);
+            } catch (statsError) {
+                console.error('Error updating stats:', statsError);
+            }
+            summary = `${savedCount} ${savedCount === 1 ? 'besvarelse' : 'besvarelser'} rettet og gemt.${errorCount > 0 ? ` ${errorCount} fejlede – tryk "Ret" igen for at prøve dem igen.` : ''}`;
+        } else if (newResults.length > 0) {
+            summary = 'Ingen resultater kunne gemmes.';
+        }
+        finishRun(examId, summary);
+        if (summary) {
+            if (savedCount > 0) toast.success(`${exam?.beskrivelse ? `${exam.beskrivelse}: ` : ''}${summary}`, { duration: 6000 });
+            else toast(summary);
+        }
+        // Kan være en no-op, hvis siden er forladt – så opdateres prøven, når siden åbnes igen
+        refreshExam().catch(() => {});
     };
     
-
 
     // ---------- Visning ----------
 
@@ -672,7 +674,8 @@ export function MathExamGrader() {
     const aiKarakter = (r) => (isDansk ? r.afrundetKarakter : r.karakter);
     const laererKarakter = (r) => (isDansk ? r.lærerGrading?.afrundetKarakter : r.lærerKarakter);
     const approvedCount = okResults.filter(isApproved).length;
-    const isBusy = grading.grading || danskGrading;
+    // Retningen kan være startet før et sideskift – fremdriften kommer fra den globale retning
+    const isBusy = Boolean(run?.running) || grading.grading || danskGrading;
     const materialeMangler = isDansk ? !parsedBedoemmelse : !grading.canProceed() && total > 0;
 
     const rowId = (r, idx) => r.submissionId || r.fileName || String(idx);
@@ -723,7 +726,7 @@ export function MathExamGrader() {
                 >
                     {isBusy ? <Loader2 /> : null}
                     {isBusy
-                        ? `Retter ${okResults.length} af ${total}…`
+                        ? `Retter ${run?.done ?? 0} af ${run?.total ?? total}…`
                         : ungraded > 0
                             ? `Ret ${ungraded} ${ungraded === 1 ? 'besvarelse' : 'besvarelser'}`
                             : 'Alle er rettet'}
@@ -747,12 +750,12 @@ export function MathExamGrader() {
 
                 {isBusy && (
                     <GradingProgress
-                        statusMessage={isDansk ? danskStatusMessage : grading.statusMessage}
-                        currentTaskPhase={isDansk ? danskCurrentTaskPhase : grading.currentTaskPhase}
-                        completedCount={okResults.length}
-                        totalCount={total}
-                        retryInfo={grading.retryInfo}
-                        currentFileName={elevnavnFraFil(grading.documents.elevbesvarelser[okResults.length]?.name)}
+                        statusMessage={run?.message ?? (isDansk ? danskStatusMessage : grading.statusMessage)}
+                        currentTaskPhase={run?.phase ?? (isDansk ? danskCurrentTaskPhase : grading.currentTaskPhase)}
+                        completedCount={run ? run.done : okResults.length}
+                        totalCount={run ? run.total : total}
+                        retryInfo={run ? run.retryInfo : grading.retryInfo}
+                        currentFileName={elevnavnFraFil(run?.current || '')}
                     />
                 )}
 
