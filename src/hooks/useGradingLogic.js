@@ -4,6 +4,7 @@ import { updateTeacherGrading, recalculateExamStats } from '../services/firestor
 import { convertPDFToImages, shouldUseVision } from '../utils/pdfToImages.js';
 import { extractPdfText } from '../utils/docLibs.js';
 import { normalizeUsage, addUsage } from '../utils/usage.js';
+import { updateRun } from '../services/gradingRuns.js';
 import { callAI, fjernElevnavn, navnFraFilnavn } from '../services/aiService.js';
 import { lookupKarakter, parseOmsaetningstabel, normalizeTabel, formatKarakter } from '../utils/karakter.js';
 
@@ -129,9 +130,14 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
     const [results, setResults] = useState([]);
     const [error, setError] = useState(null);
     const [currentStep, setCurrentStep] = useState(1);
-    const [statusMessage, setStatusMessage] = useState('');
-    const [currentTaskPhase, setCurrentTaskPhase] = useState('');
-    const [retryInfo, setRetryInfo] = useState(null);
+    const [statusMessage, setStatusMessageLocal] = useState('');
+    const [currentTaskPhase, setCurrentTaskPhaseLocal] = useState('');
+    const [retryInfo, setRetryInfoLocal] = useState(null);
+
+    // Fremdriften spejles til den globale retning, så den kan ses igen efter sideskift
+    const setStatusMessage = (message) => { setStatusMessageLocal(message); updateRun(examId, { message }); };
+    const setCurrentTaskPhase = (phase) => { setCurrentTaskPhaseLocal(phase); updateRun(examId, { phase }); };
+    const setRetryInfo = (info) => { setRetryInfoLocal(info); updateRun(examId, { retryInfo: info }); };
     const [requestDebugInfo, setRequestDebugInfo] = useState(null);
     const [totalCost, setTotalCost] = useState(0);
     const [editMode, setEditMode] = useState({});
@@ -253,8 +259,10 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExisting] - ret alle forfra (bruges efter "slet og ret igen",
      *   hvor `results` i denne closure stadig indeholder de netop slettede resultater)
+     * @param {(result: Object) => Promise<void>} [options.onResult] - kaldes for hver elev, så snart
+     *   resultatet er klar (bruges til at gemme med det samme)
      */
-    const gradeAllExams = async ({ ignoreExisting = false } = {}) => {
+    const gradeAllExams = async ({ ignoreExisting = false, onResult } = {}) => {
         if (!canProceed()) {
             setError('Upload venligst alle nødvendige dokumenter');
             return [];
@@ -289,6 +297,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
                 }
 
                 try {
+                    updateRun(examId, { current: elevFile.name });
                     setStatusMessage(`📖 Læser ${elevFile.name} (${i + 1}/${documents.elevbesvarelser.length})...`);
                     // PDF-tekst med sidemarkører, så AI kan angive siden for hvert svar
                     const erPdf = elevFile.type === 'application/pdf' || /\.pdf$/i.test(elevFile.name || '');
@@ -298,6 +307,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
                     const result = await callAIForSubmission(rettevejledning, elevbesvarelse, elevFile.name, submissionId, elevFile, omsaetningstabel);
                     newlyGradedResults.push(result);
                     setResults([...existingResults, ...newlyGradedResults]);
+                    await onResult?.(result);
 
                     if (i < documents.elevbesvarelser.length - 1) {
                         for (let j = PAUSE_MELLEM_ELEVER; j > 0; j--) {
@@ -308,13 +318,15 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
                 } catch (err) {
                     console.error(`Fejl: ${elevFile.name}`, err);
                     setRetryInfo(null);
-                    newlyGradedResults.push({
+                    const fejl = {
                         submissionId,
                         fileName: elevFile.name,
                         elevNavn: elevFile.name,
                         error: err.message
-                    });
+                    };
+                    newlyGradedResults.push(fejl);
                     setResults([...existingResults, ...newlyGradedResults]);
+                    await onResult?.(fejl);
                 }
             }
 
