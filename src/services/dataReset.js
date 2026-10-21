@@ -1,15 +1,16 @@
 /**
- * Slet ALT data: alle prøver, rettelser, besvarelser, klasser, elever, forbrugsoversigten og alle filer i Storage.
- * Kan ikke fortrydes. Bruges kun fra siden Indstillinger.
+ * Slet ALLE lærerens egne data: prøver, rettelser, besvarelser, klasser, elever, forbrug og filer.
+ * Andre læreres data røres ikke. Kan ikke fortrydes. Bruges kun fra siden Indstillinger.
  */
-import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, query, where } from 'firebase/firestore';
 import { ref, listAll, deleteObject } from 'firebase/storage';
-import { db, storage } from '../config/firebase.js';
+import { db, storage, kraevUid } from '../config/firebase.js';
 
 // Kendte undersamlinger (Firestore-klienten kan ikke selv finde dem)
 const SUBCOLLECTIONS = {
   exams: ['gradingResults', 'studentSubmissions'],
-  classes: ['students']
+  classes: ['students'],
+  usageDaily: []
 };
 
 async function deleteRefs(refs, onDeleted) {
@@ -23,10 +24,14 @@ async function deleteRefs(refs, onDeleted) {
   }
 }
 
-async function deleteCollection(name, onDeleted) {
-  const snap = await getDocs(collection(db, name));
+async function egneDokumenter(name) {
+  const snap = await getDocs(query(collection(db, name), where('ownerUid', '==', kraevUid())));
+  return snap.docs;
+}
+
+async function deleteCollection(name, docs, onDeleted) {
   const refs = [];
-  for (const d of snap.docs) {
+  for (const d of docs) {
     for (const sub of SUBCOLLECTIONS[name] || []) {
       const subSnap = await getDocs(collection(db, name, d.id, sub));
       subSnap.docs.forEach(s => refs.push(doc(db, name, d.id, sub, s.id)));
@@ -62,27 +67,30 @@ export async function deleteAllData(onProgress) {
   const report = () => onProgress?.({ ...state });
   report();
 
+  const exams = await egneDokumenter('exams');
+
   // 1) Filer først – så der ikke efterlades filer uden reference, hvis noget fejler
   let storageError = null;
-  try {
-    await deleteStorageTree('', (n) => { state.files += n; report(); });
-  } catch (err) {
-    // Fx hvis Storage-reglerne ikke tillader "list"
-    storageError = err.message;
+  for (const e of exams) {
+    try {
+      await deleteStorageTree(`exams/${e.id}`, (n) => { state.files += n; report(); });
+    } catch (err) {
+      storageError = err.message;
+    }
   }
 
   // 2) Database
   state.phase = 'Sletter prøver og rettelser…';
   report();
-  await deleteCollection('exams', (n) => { state.documents += n; report(); });
+  await deleteCollection('exams', exams, (n) => { state.documents += n; report(); });
 
   state.phase = 'Sletter klasser og elever…';
   report();
-  await deleteCollection('classes', (n) => { state.documents += n; report(); });
+  await deleteCollection('classes', await egneDokumenter('classes'), (n) => { state.documents += n; report(); });
 
   state.phase = 'Sletter forbrugsoversigt…';
   report();
-  await deleteCollection('usageDaily', (n) => { state.documents += n; report(); });
+  await deleteCollection('usageDaily', await egneDokumenter('usageDaily'), (n) => { state.documents += n; report(); });
 
   state.phase = 'Færdig';
   report();

@@ -8,6 +8,7 @@
 
 import { callAI, fjernElevnavn, navnFraFilnavn } from '../services/aiService.js';
 import { normalizeUsage } from '../utils/usage.js';
+import { kortHash } from './useGradingLogic.js';
 import { SEVENTRIN, beregnVaegtetKarakter } from '../utils/karakter.js';
 
 /**
@@ -55,7 +56,7 @@ export async function bedoemDanskOpgave(parsedBedoemmelse, elevbesvarelse, elevN
   try {
     const { result: aiResult, usage, model, cost } = await callAI('gradeDansk', payload, {
       examId,
-      resumeKey: examId ? `${examId}:${submissionId}:gradeDansk` : undefined,
+      resumeKey: examId ? `${examId}:${kortHash(submissionId)}:gradeDansk` : undefined,
       onProgress: (sek) => onProgress?.(`AI bedømmer teksten grundigt… ${sek} sek.`),
       onRetry: ({ attempt, maxRetries, waitSeconds }) =>
         onProgress?.(`AI optaget – nyt forsøg ${attempt}/${maxRetries} om ${waitSeconds} sek...`)

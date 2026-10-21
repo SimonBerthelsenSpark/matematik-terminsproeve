@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Login testes særskilt i auth.test.js – her er alle kald med "Bearer ok" logget ind
+vi.mock('../lib/auth.js', () => ({
+  verifyUser: async (h) => {
+    const t = /^Bearer (.+)$/.exec(h || '')?.[1];
+    if (!t) throw Object.assign(new Error('Du er ikke logget ind. Log ind igen.'), { status: 401 });
+    return { uid: t === 'anden' ? 'uid-2' : 'uid-1', email: 'l@skole.dk' };
+  }
+}));
 import { handler, _internal } from '../functions/grade-exam.js';
 
 const ORIGIN = 'https://min-site.netlify.app';
 
 function event(body, { origin = ORIGIN, method = 'POST' } = {}) {
-  return { httpMethod: method, headers: { origin }, body: JSON.stringify(body) };
+  return { httpMethod: method, headers: { origin, authorization: 'Bearer ok' }, body: JSON.stringify(body) };
 }
 
 function openaiOk(content, finish_reason = 'stop') {
@@ -111,5 +120,17 @@ describe('grade-exam', () => {
     });
     expect(req.messages[1].content).toContain('[K1] Indhold');
     expect(req.schema.schema.properties.kriterier.items.properties.delKarakter.enum).toEqual([-3, 0, 2, 4, 7, 10, 12]);
+  });
+});
+
+describe('databehandling hos OpenAI', () => {
+  afterEach(() => { delete process.env.OPENAI_BASE_URL; vi.unstubAllGlobals(); });
+  it('kan sende til OpenAIs europæiske endpoint og beder om ikke at gemme', async () => {
+    process.env.OPENAI_BASE_URL = 'https://eu.api.openai.com/v1/';
+    const fetchMock = vi.fn().mockResolvedValue(openaiOk('OK'));
+    vi.stubGlobal('fetch', fetchMock);
+    await handler(event({ task: 'ping', payload: {} }));
+    expect(fetchMock.mock.calls[0][0]).toBe('https://eu.api.openai.com/v1/chat/completions');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).store).toBe(false);
   });
 });

@@ -5,11 +5,26 @@ import { Toaster } from 'react-hot-toast';
 import { ExamContextProvider } from './hooks/useExamContext.jsx';
 import { ConfirmProvider } from './components/ui.jsx';
 import './index.css';
-import { setUsageRecorder } from './services/aiService.js';
+import { setUsageRecorder, setAuthTokenProvider } from './services/aiService.js';
 import { recordUsage } from './services/usageService.js';
+import { auth } from './config/firebase.js';
+import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
+import { LoginPage, BekraeftEmailPage, AfventerGodkendelsePage, AuthLoader } from './pages/LoginPage.jsx';
 
 // Alt AI-forbrug registreres pr. dag og pr. prøve
 setUsageRecorder(recordUsage);
+// AI-funktionerne kræver den indloggede lærers ID-token
+setAuthTokenProvider(() => auth.currentUser?.getIdToken() ?? null);
+
+/** Kun godkendte, indloggede lærere ser appen. */
+function AuthGate({ children }) {
+  const { status } = useAuth();
+  if (status === 'loading') return <AuthLoader />;
+  if (status === 'anonym') return <LoginPage />;
+  if (status === 'ubekraeftet') return <BekraeftEmailPage />;
+  if (status === 'afventer') return <AfventerGodkendelsePage />;
+  return children;
+}
 
 // Siderne lazy-loades, så forsiden ikke skal hente pdf.js, mammoth m.m.
 const HomePage = lazy(() => import('./pages/HomePage.jsx').then(m => ({ default: m.HomePage })));
@@ -18,6 +33,7 @@ const EditExamPage = lazy(() => import('./pages/EditExamPage.jsx').then(m => ({ 
 const StudentMatrixPage = lazy(() => import('./pages/StudentMatrixPage.jsx').then(m => ({ default: m.StudentMatrixPage })));
 const ClassesPage = lazy(() => import('./pages/ClassesPage.jsx').then(m => ({ default: m.ClassesPage })));
 const UsagePage = lazy(() => import('./pages/UsagePage.jsx').then(m => ({ default: m.UsagePage })));
+const DataPage = lazy(() => import('./pages/DataPage.jsx').then(m => ({ default: m.DataPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx').then(m => ({ default: m.SettingsPage })));
 const ExamDetailPage = lazy(() => import('./pages/ExamDetailPage.jsx').then(m => ({ default: m.ExamDetailPage })));
 
@@ -47,6 +63,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           error: { iconTheme: { primary: '#B4372B', secondary: '#fff' }, duration: 6000 }
         }}
       />
+      <AuthProvider>
+      <AuthGate>
       <ConfirmProvider>
       <Suspense fallback={<PageLoader />}>
         <Routes>
@@ -59,6 +77,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           {/* Indstillinger (slet alle data) */}
           <Route path="/forbrug" element={<UsagePage />} />
           <Route path="/indstillinger" element={<SettingsPage />} />
+          <Route path="/databehandling" element={<DataPage />} />
 
           {/* Create New Exam */}
           <Route path="/exams/new" element={<CreateExamPage />} />
@@ -84,6 +103,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         </Routes>
       </Suspense>
       </ConfirmProvider>
+      </AuthGate>
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

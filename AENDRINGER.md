@@ -205,3 +205,16 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - Den igangværende retning huskes (`aiRetning:{examId}`). Når prøven åbnes igen, fortsætter retningen automatisk med de manglende elever.
 - På andre sider vises "Retningen af … blev afbrudt" med "Fortsæt retningen" og "Fortsæt ikke".
 - Kortvarige netværksudfald under ventetiden stopper ikke længere en elev.
+
+## Login og databeskyttelse
+
+- **Login med e-mail og adgangskode** (Firebase Auth) med bekræftet e-mail. Kun lærere godkendt af en administrator (`brugere/{email}`) får adgang. Faste administratorer: `src/config/admins.js`.
+- **Hver lærer ser kun sine egne data:** prøver, klasser og forbrug får `ownerUid`, og alle forespørgsler filtrerer på den. `firestore.rules` og `storage.rules` håndhæver det i databasen.
+- **AI-funktionerne kræver login:** `grade-start`, `grade-status` og `grade-exam` verificerer lærerens Firebase ID-token (nøgler fra Google, via `jose`) og at læreren er godkendt. Et job kan kun hentes af den lærer, der startede det.
+- **Elevnavne fjernes fra billederne:** navnet dækkes med sorte felter, hvor det står som tekst i PDF'en. Valgfrit: "Dæk toppen af første side" til håndskrevne navne (Rediger prøve). Translittererede navne (Soeren → Søren) findes også.
+- Ingen elevnavne i browserens lager (job-nøgler hashes).
+- OpenAI: `store: false` og mulighed for EU-endpoint via `OPENAI_BASE_URL`.
+- Ny side **Databehandling** (Indstillinger → Læs mere) til lærere, ledelse og DPO.
+- Indstillinger: konto, lærere (administratorer), overtagelse af data fra før login, "Slet alle mine data".
+- Elevfilerne er fjernet fra repoets historik.
+- Se **OPSAETNING-LOGIN.md** for trinene i Firebase, Netlify og GitHub.

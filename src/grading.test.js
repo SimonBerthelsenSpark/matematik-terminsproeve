@@ -317,3 +317,14 @@ describe('Genoptag job efter genindlæsning', () => {
     vi.useRealTimers();
   });
 });
+
+import { kortHash } from './hooks/useGradingLogic.js';
+
+describe('Ingen elevnavne i browserens lager', () => {
+  it('nøglen indeholder ikke navnet', () => {
+    const h = kortHash('5_Emma Pedersen');
+    expect(h).not.toMatch(/emma|pedersen/i);
+    expect(kortHash('5_Emma Pedersen')).toBe(h);
+    expect(kortHash('6_Frederik Møller')).not.toBe(h);
+  });
+});

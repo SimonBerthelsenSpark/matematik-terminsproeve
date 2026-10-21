@@ -21,7 +21,7 @@ export default async (req) => {
   const job = await store.get(payloadKey(id), { type: 'json' });
   if (!job) return; // Ukendt eller allerede kørt job
 
-  await store.setJSON(stateKey(id), { state: 'running', startedAt: Date.now() });
+  await store.setJSON(stateKey(id), { state: 'running', startedAt: Date.now(), uid: job.uid });
 
   let outcome;
   try {
@@ -35,7 +35,8 @@ export default async (req) => {
     state: outcome.statusCode === 200 ? 'done' : 'error',
     statusCode: outcome.statusCode,
     response: outcome.body,
-    finishedAt: Date.now()
+    finishedAt: Date.now(),
+    uid: job.uid
   });
   // Elevens tekst skal ikke ligge længere end nødvendigt
   await store.delete(payloadKey(id));

@@ -11,6 +11,13 @@ import { lookupKarakter, parseOmsaetningstabel, normalizeTabel, formatKarakter }
 /** Pause mellem elever (sekunder). 429-fejl håndteres desuden med automatisk backoff. */
 const PAUSE_MELLEM_ELEVER = 2;
 
+/** Kort, ikke-genkendelig nøgle for en elev (elevnavne må ikke ligge i browserens lager). */
+export const kortHash = (s) => {
+    let h = 0x811c9dc5;
+    for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0;
+    return h.toString(36);
+};
+
 const submissionIdFraFil = (file) => file.name.replace(/\.[^/.]+$/, '');
 
 /**
@@ -190,7 +197,10 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         if (useVision) {
             try {
                 setCurrentTaskPhase('Konverterer sider til billeder...');
-                const { images, truncated, totalPages } = await convertPDFToImages(elevFile);
+                const { images, truncated, totalPages } = await convertPDFToImages(elevFile, {
+                    elevNavn: navnFraFilnavn(elevNavn),
+                    daekSidehoved: Boolean(examSettings?.skjulSidehoved)
+                });
                 pdfImages = images;
                 if (truncated) {
                     console.warn(`Vision: kun ${images.length} af ${totalPages} sider sendes som billeder (størrelsesgrænse)`);
@@ -219,7 +229,7 @@ export function useGradingLogic(readFileContent, examId = null, examSettings = n
         const opts = (nr) => ({
             examId,
             // Genindlæses siden, hentes de igangværende retninger igen i stedet for at starte forfra
-            resumeKey: examId ? `${examId}:${submissionId}:gradeMath:${nr}` : undefined,
+            resumeKey: examId ? `${examId}:${kortHash(submissionId)}:gradeMath:${nr}` : undefined,
             onProgress: (sek) => setCurrentTaskPhase(`AI retter besvarelsen to gange uafhængigt… ${sek} sek.`),
             onRetry: (info) => setRetryInfo({ ...info, elevNavn, retning: nr }),
             onWaitTick: (s) => setStatusMessage(`⏳ Venter ${s} sekunder før nyt forsøg...`)

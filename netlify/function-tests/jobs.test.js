@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Login testes særskilt i auth.test.js – her er alle kald med "Bearer ok" logget ind
+vi.mock('../lib/auth.js', () => ({
+  verifyUser: async (h) => {
+    const t = /^Bearer (.+)$/.exec(h || '')?.[1];
+    if (!t) throw Object.assign(new Error('Du er ikke logget ind. Log ind igen.'), { status: 401 });
+    return { uid: t === 'anden' ? 'uid-2' : 'uid-1', email: 'l@skole.dk' };
+  }
+}));
+
 // In-memory erstatning for Netlify Blobs
 const mem = new Map();
 vi.mock('@netlify/blobs', () => ({
@@ -16,7 +25,7 @@ const { default: status } = await import('../functions/grade-status.js');
 
 const ORIGIN = 'https://min-site.netlify.app';
 const post = (url, body, origin = ORIGIN) =>
-  new Request(url, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  new Request(url, { method: 'POST', headers: { origin, authorization: 'Bearer ok', 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 describe('baggrundsretning', () => {
   beforeEach(() => {
@@ -43,19 +52,19 @@ describe('baggrundsretning', () => {
     const { jobId } = await res.json();
     expect(backgroundCall.id).toBe(jobId);
 
-    const queued = await (await status(new Request(`${ORIGIN}/.netlify/functions/grade-status?id=${jobId}`))).json();
+    const queued = await (await status(new Request(`${ORIGIN}/.netlify/functions/grade-status?id=${jobId}`, { headers: { authorization: 'Bearer ok' } }))).json();
     expect(queued.state).toBe('queued');
 
     await run(post(`${ORIGIN}/.netlify/functions/grade-run-background`, { id: jobId }));
     expect(mem.has(`payload/${jobId}`)).toBe(false);
 
-    const done = await (await status(new Request(`${ORIGIN}/.netlify/functions/grade-status?id=${jobId}`))).json();
+    const done = await (await status(new Request(`${ORIGIN}/.netlify/functions/grade-status?id=${jobId}`, { headers: { authorization: 'Bearer ok' } }))).json();
     expect(done.state).toBe('done');
     expect(done.response.result.opgaver).toEqual([]);
     expect(done.response.model).toBe('gpt-6.1-sol');
 
     // Resultatet kan kun hentes én gang
-    const gone = await status(new Request(`${ORIGIN}/.netlify/functions/grade-status?id=${jobId}`));
+    const gone = await status(new Request(`${ORIGIN}/.netlify/functions/grade-status?id=${jobId}`, { headers: { authorization: 'Bearer ok' } }));
     expect(gone.status).toBe(404);
   });
 
@@ -79,13 +88,13 @@ describe('baggrundsretning', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 202 })));
     const req = new Request('https://lovely-lolly-f39ae9.netlify.app/.netlify/functions/grade-start', {
       method: 'POST',
-      headers: { origin: 'https://retter.example.dk', host: 'retter.example.dk', 'content-type': 'application/json' },
+      headers: { origin: 'https://retter.example.dk', host: 'retter.example.dk', authorization: 'Bearer ok', 'content-type': 'application/json' },
       body: JSON.stringify({ task: 'ping' })
     });
     expect((await start(req)).status).toBe(202);
     const req2 = new Request('https://internal.local/x', {
       method: 'POST',
-      headers: { origin: 'https://min.skole.dk', 'content-type': 'application/json' },
+      headers: { origin: 'https://min.skole.dk', authorization: 'Bearer ok', 'content-type': 'application/json' },
       body: JSON.stringify({ task: 'ping' })
     });
     expect((await start(req2, { site: { url: 'https://min.skole.dk' } })).status).toBe(202);
@@ -101,13 +110,28 @@ describe('baggrundsretning', () => {
     const res = await start(post(`${ORIGIN}/.netlify/functions/grade-start`, { task: 'ping' }));
     const { jobId } = await res.json();
     await run(post(`${ORIGIN}/x`, { id: jobId }));
-    const out = await (await status(new Request(`${ORIGIN}/x?id=${jobId}`))).json();
+    const out = await (await status(new Request(`${ORIGIN}/x?id=${jobId}`, { headers: { authorization: 'Bearer ok' } }))).json();
     expect(out.state).toBe('error');
     expect(out.statusCode).toBe(429);
   });
 
+  it('kræver login for at starte og hente job', async () => {
+    const res = await start(new Request(`${ORIGIN}/x`, { method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ task: 'ping' }) }));
+    expect(res.status).toBe(401);
+  });
+
+  it('en anden lærer kan ikke hente jobbet', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 202 })));
+    const res = await start(post(`${ORIGIN}/.netlify/functions/grade-start`, { task: 'ping' }));
+    const { jobId } = await res.json();
+    const anden = await status(new Request(`${ORIGIN}/x?id=${jobId}`, { headers: { authorization: 'Bearer anden' } }));
+    expect(anden.status).toBe(404);
+    const egen = await status(new Request(`${ORIGIN}/x?id=${jobId}`, { headers: { authorization: 'Bearer ok' } }));
+    expect(egen.status).toBe(200);
+  });
+
   it('afviser ugyldige job-id', async () => {
-    const res = await status(new Request(`${ORIGIN}/x?id=../../etc`));
+    const res = await status(new Request(`${ORIGIN}/x?id=../../etc`, { headers: { authorization: 'Bearer ok' } }));
     expect(res.status).toBe(400);
   });
 });
