@@ -40,6 +40,7 @@ export function StudentResult({
     const [openOpgave, setOpenOpgave] = useState(null);
     const [showPdf, setShowPdf] = useState(læsPdfPref);
     const [pdfPage, setPdfPage] = useState(null);
+    const sideBySideRef = React.useRef(null);
     const [bredSkærm, setBredSkærm] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1024px)').matches);
 
     useEffect(() => {
@@ -66,6 +67,18 @@ export function StudentResult({
     }, [submissionPath]);
     const harPdf = Boolean(submissionFile || submissionPath);
     const vedSiden = showPdf && harPdf && bredSkærm;
+
+    // Når eleven åbnes ved siden af besvarelsen, fylder de to vinduer skærmen
+    useEffect(() => {
+        if (!vedSiden || !sideBySideRef.current) return;
+        const t = setTimeout(() => {
+            sideBySideRef.current?.scrollIntoView({
+                block: 'start',
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+            });
+        }, 50);
+        return () => clearTimeout(t);
+    }, [vedSiden]);
 
     const vælgOpgave = (i) => {
         const åben = openOpgave === i ? null : i;
@@ -279,15 +292,16 @@ export function StudentResult({
                 </div>
             )}
             {vedSiden ? (
-                <div className="grid gap-5 lg:grid-cols-2 items-start">
+                // To uafhængige rullevinduer i skærmens højde: besvarelsen til venstre, point til højre
+                <div ref={sideBySideRef} className="grid gap-5 grid-cols-2 h-[calc(100vh-5rem)] min-h-[30rem] scroll-mt-4">
                     <PdfPane
                         file={submissionFile}
                         loadFile={submissionFile ? undefined : loadFile}
                         page={pdfPage}
                         onOpenExternal={submissionPath ? openSubmission : undefined}
-                        className="sticky top-4 h-[calc(100vh-2rem)]"
+                        className="h-full"
                     />
-                    <div className="space-y-5 min-w-0">
+                    <div className="h-full min-h-0 min-w-0 overflow-y-auto overscroll-contain space-y-5 pr-1" tabIndex={0} aria-label="Point og karakter">
                         {tabel}
                         {panel}
                     </div>
