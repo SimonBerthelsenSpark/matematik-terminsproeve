@@ -27,7 +27,8 @@ export function DataPage() {
         </Blok>
 
         <Blok title="Oplysninger der behandles">
-          <p><strong>Om elever:</strong> navn og elevnummer (filnavne og klasselister), besvarelsen som PDF, point, karakterer og feedback.</p>
+          <p><strong>Om elever:</strong> elevnummer og et alias (ikke rigtige navne), den anonymiserede besvarelse, point, karakterer og feedback. Koblingen mellem nummer og elev findes kun hos læreren, uden for appen.</p>
+          <p><strong>Anonymisering før upload:</strong> læreren gennemser hver besvarelse og dækker navn og andet, der kan afsløre eleven, med sorte felter. Appen laver en ny PDF, hvor felterne er brændt ind, og tekst under felterne er fjernet. Kun den version uploades – originalen bliver på lærerens computer.</p>
           <p><strong>Om lærere:</strong> e-mail og AI-forbrug.</p>
           <p>Appen behandler ikke følsomme oplysninger, og eleverne bruger ikke appen selv.</p>
         </Blok>
@@ -38,7 +39,7 @@ export function DataPage() {
 
         <Blok title="Hvad der sendes til AI (OpenAI)">
           <p>Ved retning sendes rettevejledningen, elevens tekst og billeder af siderne.</p>
-          <p><strong>Elevens navn fjernes først:</strong> i teksten erstattes navnet med [ELEV], og på billederne dækkes navnet med et sort felt, hvor det står som tekst i PDF'en. Håndskrevne navne kan ikke findes automatisk – slå "Dæk toppen af første side" til på prøven, eller lad eleverne skrive elevnummer i stedet for navn. Filnavnet sendes ikke.</p>
+          <p>AI'en får kun den anonymiserede besvarelse – uden navn, filnavn og elevnummer. OpenAI kan derfor ikke med rimelighed finde ud af, hvem eleven er. Som ekstra sikring dækkes elevens alias også automatisk, hvis det står i besvarelsen.</p>
           <p>OpenAI bruger ikke data fra API'et til at træne modeller, og appen beder om, at svarene ikke gemmes. Når appen bruger et OpenAI-projekt med europæisk dataopbevaring, behandles forespørgslerne i Europa og gemmes ikke.</p>
         </Blok>
 
