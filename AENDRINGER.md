@@ -230,3 +230,8 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 ## Uafhængig rulning ved siden af besvarelsen
 
 - Når en elev åbnes med besvarelsen ved siden af, fylder de to vinduer skærmens højde og ruller hver for sig. Besvarelsen bliver stående, mens man ruller ned gennem opgaver, karakter og feedback.
+
+## Ret alias
+
+- Under Klasser kan en elevs alias rettes direkte: klik på aliaset eller blyanten, skriv, og tryk Enter (Esc fortryder). Tomt felt giver "Elev" + nummer. Besvarelser følger eleven via nummeret.
+- På Besvarelser vises "Åbn besvarelse" i stedet for filnavnet, så gamle filnavne med rigtige navne ikke vises.

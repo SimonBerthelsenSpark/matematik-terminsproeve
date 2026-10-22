@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useClasses } from '../hooks/useClasses.js';
-import { Loader2, Trash2, Plus, X, Users } from './Icons.jsx';
+import { Loader2, Trash2, Plus, X, Users, Pencil, Check } from './Icons.jsx';
 import { PageHeader, Spinner, Notice, EmptyState, useConfirm } from './ui.jsx';
 import { updateStudent } from '../services/classService.js';
 
@@ -282,6 +282,19 @@ function ClassDetail({ cls, students, loading, onDeleteClass, addStudent, delete
     }
   };
 
+  const gemAlias = async (student, alias) => {
+    const nyt = alias.trim() || standardAlias(student.studentNumber);
+    if (nyt === student.studentName) return true;
+    try {
+      await updateStudent(cls.id, student.id, { studentName: nyt });
+      await reload();
+      return true;
+    } catch (err) {
+      toast.error(`Aliaset kunne ikke gemmes: ${err.message}`);
+      return false;
+    }
+  };
+
   const remove = async (student) => {
     const ok = await confirm({
       title: `Fjern ${student.studentNumber}. ${student.studentName}?`,
@@ -393,24 +406,78 @@ function ClassDetail({ cls, students, loading, onDeleteClass, addStudent, delete
           )}
           <ul className="divide-y divide-line border border-line rounded-control">
             {students.map(s => (
-              <li key={s.id} className="group flex items-center gap-3 px-3 py-2">
-                <span className="num w-8 text-right text-sm text-ink-soft">{s.studentNumber}</span>
-                <span className="flex-1 text-sm">{s.studentName}</span>
-                <button
-                  type="button"
-                  className="btn-icon md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
-                  onClick={() => remove(s)}
-                  aria-label={`Fjern ${s.studentName}`}
-                  title="Fjern elev"
-                >
-                  <X />
-                </button>
-              </li>
+              <ElevRaekke key={s.id} elev={s} onGem={(alias) => gemAlias(s, alias)} onFjern={() => remove(s)} />
             ))}
           </ul>
           </>
         )}
       </div>
     </section>
+  );
+}
+
+/** Én elev i listen. Klik på aliaset (eller blyanten) for at rette det. */
+function ElevRaekke({ elev, onGem, onFjern }) {
+  const [redigerer, setRedigerer] = useState(false);
+  const [vaerdi, setVaerdi] = useState(elev.studentName);
+  const [gemmer, setGemmer] = useState(false);
+
+  const start = () => { setVaerdi(elev.studentName); setRedigerer(true); };
+  const gem = async (e) => {
+    e?.preventDefault();
+    setGemmer(true);
+    const ok = await onGem(vaerdi);
+    setGemmer(false);
+    if (ok) setRedigerer(false);
+  };
+
+  if (redigerer) {
+    return (
+      <li className="flex items-center gap-3 px-3 py-1.5 bg-paper">
+        <span className="num w-8 text-right text-sm text-ink-soft">{elev.studentNumber}</span>
+        <form onSubmit={gem} className="flex-1 flex items-center gap-2">
+          <input
+            className="input h-8 text-sm flex-1"
+            value={vaerdi}
+            onChange={(e) => setVaerdi(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setRedigerer(false); }}
+            placeholder={standardAlias(elev.studentNumber)}
+            aria-label={`Alias for elev ${elev.studentNumber}`}
+            autoFocus
+          />
+          <button type="submit" className="btn-primary btn-sm" disabled={gemmer}>
+            {gemmer ? <Loader2 /> : <Check className="w-3.5 h-3.5" />} Gem
+          </button>
+          <button type="button" className="btn-ghost btn-sm" onClick={() => setRedigerer(false)} disabled={gemmer}>Annuller</button>
+        </form>
+      </li>
+    );
+  }
+
+  return (
+    <li className="group flex items-center gap-3 px-3 py-2">
+      <span className="num w-8 text-right text-sm text-ink-soft">{elev.studentNumber}</span>
+      <button type="button" onClick={start} className="flex-1 text-left text-sm hover:underline underline-offset-2" title="Ret alias">
+        {elev.studentName}
+      </button>
+      <button
+        type="button"
+        className="btn-icon md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+        onClick={start}
+        aria-label={`Ret alias for elev ${elev.studentNumber}`}
+        title="Ret alias"
+      >
+        <Pencil className="w-4 h-4" />
+      </button>
+      <button
+        type="button"
+        className="btn-icon md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+        onClick={onFjern}
+        aria-label={`Fjern elev ${elev.studentNumber}`}
+        title="Fjern elev"
+      >
+        <X />
+      </button>
+    </li>
   );
 }
