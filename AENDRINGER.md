@@ -226,3 +226,7 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - **Kun den anonymiserede PDF forlader computeren:** siderne gemmes som billeder med felterne brændt ind, og kun tekst, der ikke er dækket, lægges usynligt ind (så appen stadig kan læse teksten). Originalens filnavn gemmes ikke.
 - Ældre besvarelser vises med "Anonymisér", så de kan gennemses og erstattes.
 - Ny afhængighed: `pdf-lib`.
+
+## Uafhængig rulning ved siden af besvarelsen
+
+- Når en elev åbnes med besvarelsen ved siden af, fylder de to vinduer skærmens højde og ruller hver for sig. Besvarelsen bliver stående, mens man ruller ned gennem opgaver, karakter og feedback.
