@@ -16,6 +16,7 @@ import { getFileDownloadURL } from '../services/storageService.js';
 import { parseDanskBedoemmelse, getCachedParsedBedoemmelse, saveParsedBedoemmelse } from '../utils/danskBedoemmelsesParser.js';
 import { bedoemDanskOpgave } from '../hooks/useDanskGrading.js';
 import { startRun, finishRun, addRunResult, updateRun, clearRun, mergeResults, useGradingRun, useInterruptedRuns, dismissInterrupted } from '../services/gradingRuns.js';
+import { PrintDialog } from './PrintFeedback.jsx';
 import { resultatForbrug, totalTokens, formatTokensKort, formatKr } from '../utils/usage.js';
 
 /** Data der gemmes i gradingResults for én elev. */
@@ -58,6 +59,7 @@ function byggGradingData(result, type, submissionId) {
 export function MathExamGrader() {
     const confirm = useConfirm();
     const [openId, setOpenId] = useState(null);
+    const [printValg, setPrintValg] = useState(null); // null | { results, enkelt }
     // Indlæsning af besvarelsesfiler fra Storage
     const [loadingFiles, setLoadingFiles] = useState(true);
     const [fileProblems, setFileProblems] = useState([]);
@@ -825,7 +827,12 @@ export function MathExamGrader() {
                                 {gennemsnit !== null && <span className="text-ink-soft">. Gennemsnit <span className="num">{gennemsnit.toFixed(1).replace('.', ',')}</span></span>}
                                 {approvedCount < okResults.length && <span className="text-ink-soft">. Åbn en elev for at tjekke og godkende karakteren.</span>}
                             </p>
-                            <GradeLegend />
+                            <div className="flex items-center gap-4">
+                                <GradeLegend />
+                                <button type="button" className="btn-secondary btn-sm" onClick={() => setPrintValg({ results: okResults, enkelt: false })} disabled={okResults.length === 0}>
+                                    Print feedback
+                                </button>
+                            </div>
                         </div>
 
                         <div className="hidden sm:grid grid-cols-[2.5rem_minmax(0,1fr)_6rem_5rem_5rem_9rem_1.25rem] gap-x-3 px-5 py-2 border-b border-line bg-paper/60 text-[13px] font-semibold text-ink-soft" aria-hidden="true">
@@ -898,6 +905,7 @@ export function MathExamGrader() {
                                                         parsedBedoemmelse={parsedBedoemmelse}
                                                         examId={examId}
                                                         submissions={submissions}
+                                                        onPrint={() => setPrintValg({ results: [r], enkelt: true })}
                                                         onSave={(i, lærerGrading) => {
                                                             grading.setResults(prev => {
                                                                 const updated = [...prev];
@@ -927,6 +935,7 @@ export function MathExamGrader() {
                                                         submissions={submissions}
                                                         omsaetningstabel={exam?.omsaetningstabelData}
                                                         submissionFile={findElevFil(r)}
+                                                        onPrint={() => setPrintValg({ results: [r], enkelt: true })}
                                                     />
                                                 )}
                                             </div>
@@ -957,6 +966,7 @@ export function MathExamGrader() {
                     </div>
                 )}
             </div>
+            {printValg && <PrintDialog results={printValg.results} exam={exam} enkelt={printValg.enkelt} onLuk={() => setPrintValg(null)} />}
         </ExamShell>
     );
 }

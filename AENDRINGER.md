@@ -235,3 +235,9 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 
 - Under Klasser kan en elevs alias rettes direkte: klik på aliaset eller blyanten, skriv, og tryk Enter (Esc fortryder). Tomt felt giver "Elev" + nummer. Besvarelser følger eleven via nummeret.
 - På Besvarelser vises "Åbn besvarelse" i stedet for filnavnet, så gamle filnavne med rigtige navne ikke vises.
+
+## Print feedback til eleverne
+
+- "Print feedback" på Retning (hele klassen) og "Print feedback til eleven" ved hver elev. Ét A4-ark pr. elev med prøve, elevnummer/alias, karakter, point pr. opgave (dansk: delkarakter pr. kriterium), evt. kommentar pr. opgave og feedback til eleven.
+- Valg: kun godkendte karakterer (ikke-godkendte markeres "foreløbig") og om kommentarer pr. opgave skal med. Lærerens rettede point og karakter bruges, når de findes.
+- "Gem som PDF" i printdialogen giver en PDF til digital deling.

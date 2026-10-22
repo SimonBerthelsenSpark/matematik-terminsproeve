@@ -34,7 +34,8 @@ export function StudentResult({
     examId,
     submissions = null,
     omsaetningstabel = null,
-    submissionFile = null
+    submissionFile = null,
+    onPrint = null
 }) {
     const [submissionPath, setSubmissionPath] = useState(null);
     const [openOpgave, setOpenOpgave] = useState(null);
@@ -270,6 +271,10 @@ export function StudentResult({
                             </div>
                         )}
                     </div>
+                )}
+
+                {onPrint && (
+                    <button type="button" className="btn-secondary w-full" onClick={onPrint}>Print feedback til eleven</button>
                 )}
 
                 <BesvarelseForbrug result={result} />

@@ -9,6 +9,7 @@ import { setUsageRecorder, setAuthTokenProvider } from './services/aiService.js'
 import { recordUsage } from './services/usageService.js';
 import { auth } from './config/firebase.js';
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
+import { PrintRoot } from './components/PrintFeedback.jsx';
 import { LoginPage, BekraeftEmailPage, AfventerGodkendelsePage, AuthLoader } from './pages/LoginPage.jsx';
 
 // Alt AI-forbrug registreres pr. dag og pr. prøve
@@ -66,6 +67,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <AuthProvider>
       <AuthGate>
       <ConfirmProvider>
+      <PrintRoot />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Home - Exam List */}
