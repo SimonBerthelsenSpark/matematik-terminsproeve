@@ -218,3 +218,11 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - Indstillinger: konto, lærere (administratorer), overtagelse af data fra før login, "Slet alle mine data".
 - Elevfilerne er fjernet fra repoets historik.
 - Se **OPSAETNING-LOGIN.md** for trinene i Firebase, Netlify og GitHub.
+
+## Anonymisering før upload og kun nummer/alias
+
+- **Klasser:** kun elevnummer og alias (standard "Elev N"). "Opret flere elever" laver N elever på én gang. "Erstat navne med 'Elev' + nummer" fjerner rigtige navne fra ældre klasser.
+- **Upload:** hver PDF gennemses i en ny visning, før den uploades. Appen foreslår sorte felter (alias, "Navn:"-linjer, plads til håndskrevet navn, toppen af scannede sider). Læreren kan trække nye felter, fjerne felter og fortryde.
+- **Kun den anonymiserede PDF forlader computeren:** siderne gemmes som billeder med felterne brændt ind, og kun tekst, der ikke er dækket, lægges usynligt ind (så appen stadig kan læse teksten). Originalens filnavn gemmes ikke.
+- Ældre besvarelser vises med "Anonymisér", så de kan gennemses og erstattes.
+- Ny afhængighed: `pdf-lib`.

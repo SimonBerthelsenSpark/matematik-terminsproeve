@@ -7,8 +7,9 @@ import { Layout } from '../components/Layout.jsx';
 import { Loader2, Trash2, Upload, ExternalLink } from '../components/Icons.jsx';
 import { Spinner, Notice, EmptyState, GradeMark, GradeLegend, StatusPill, useConfirm } from '../components/ui.jsx';
 import { getAllClasses, getStudents } from '../services/classService.js';
-import { uploadStudentSubmission, getFileDownloadURL } from '../services/storageService.js';
-import { addSubmission, getSubmissions, deleteSubmission, getGradingResults } from '../services/firestoreService.js';
+import { uploadStudentSubmission, getFileDownloadURL, uploadFile } from '../services/storageService.js';
+import { AnonymiserDialog } from '../components/AnonymiserDialog.jsx';
+import { addSubmission, getSubmissions, deleteSubmission, getGradingResults, opdaterBesvarelse } from '../services/firestoreService.js';
 import { matchFilesToStudents, validateSubmissionFile, PDF_HJAELP } from '../utils/matchFiles.js';
 
 /**
@@ -27,6 +28,7 @@ export function StudentMatrixPage() {
   const [busyStudentId, setBusyStudentId] = useState(null);
   const [bulk, setBulk] = useState(null); // { matches, unmatched, errors } før upload
   const [bulkUploading, setBulkUploading] = useState(false);
+  const [koe, setKoe] = useState(null); // besvarelser der skal anonymiseres før upload
   const [error, setError] = useState(null);
   const bulkInputRef = useRef(null);
 
@@ -60,39 +62,65 @@ export function StudentMatrixPage() {
     })();
   }, [examId, exams, loadingExams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const submissionFor = (student) => submissions.find(sub => sub.id === `${student.studentNumber}_${student.studentName}`);
+  // Ældre besvarelser kan have et andet navn efter nummeret, så nummeret er nok
+  const submissionFor = (student) =>
+    submissions.find(sub => sub.id === `${student.studentNumber}_${student.studentName}`)
+    || submissions.find(sub => sub.id.startsWith(`${student.studentNumber}_`) || sub.id === String(student.studentNumber));
   const resultFor = (submission) => submission && gradingResults.find(r => r.submissionId === submission.id);
 
   // ---------- Upload ----------
 
-  const uploadForStudent = async (student, file) => {
-    const fejl = await validateSubmissionFile(file);
-    if (fejl) throw new Error(fejl);
-    const ext = file.name.split('.').pop().toLowerCase();
-    const fileName = `${student.studentNumber}_${student.studentName}.${ext}`;
-    const uploadResult = await uploadStudentSubmission(examId, file, fileName);
-    await addSubmission(examId, {
-      fileName,
-      originalFileName: file.name,
-      storagePath: uploadResult.storagePath,
-      fileSize: file.size,
-      contentType: file.type
-    });
-  };
+  const filnavnFor = (student) => `${student.studentNumber}_${student.studentName}.pdf`;
 
+  // Alle besvarelser gennemses og anonymiseres, før de uploades
   const handleSingleUpload = async (student, file) => {
     if (!file) return;
+    const fejl = await validateSubmissionFile(file);
+    if (fejl) {
+      toast.error(`${fejl}. ${/PDF/.test(fejl) ? PDF_HJAELP : ''}`.trim(), { duration: 8000 });
+      return;
+    }
+    setKoe([{ student, file, filnavn: filnavnFor(student) }]);
+  };
+
+  /** Anonymisér en besvarelse, der blev uploadet før anonymiseringen fandtes. */
+  const anonymiserEksisterende = async (student, submission) => {
     try {
       setBusyStudentId(student.id);
-      await uploadForStudent(student, file);
-      await reloadData();
-      await refreshExams();
-      toast.success(`Besvarelsen for ${student.studentName} er uploadet`);
+      const res = await fetch(await getFileDownloadURL(submission.storagePath));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      setKoe([{ student, file: blob, filnavn: submission.fileName, eksisterende: submission }]);
     } catch (err) {
-      toast.error(`${err.message}. ${/PDF/.test(err.message) ? PDF_HJAELP : ''}`.trim(), { duration: 8000 });
+      toast.error(`Filen kunne ikke hentes: ${err.message}`);
     } finally {
       setBusyStudentId(null);
     }
+  };
+
+  const gemAnonymiseret = async (item, fil, { felter }) => {
+    if (item.eksisterende) {
+      // Erstat filen og markér den som anonymiseret
+      await uploadFile(fil, item.eksisterende.storagePath);
+      await opdaterBesvarelse(examId, item.eksisterende.id, { anonymiseret: true, antalFelter: felter, originalFileName: null, fileSize: fil.size });
+    } else {
+      const uploadResult = await uploadStudentSubmission(examId, fil, item.filnavn);
+      await addSubmission(examId, {
+        fileName: item.filnavn,
+        storagePath: uploadResult.storagePath,
+        fileSize: fil.size,
+        contentType: 'application/pdf',
+        anonymiseret: true,
+        antalFelter: felter
+      });
+    }
+    toast.success(`${item.student?.studentName || item.filnavn} er anonymiseret og uploadet`);
+  };
+
+  const lukKoe = async () => {
+    setKoe(null);
+    await reloadData();
+    await refreshExams();
   };
 
   const handleBulkSelect = async (fileList) => {
@@ -107,25 +135,10 @@ export function StudentMatrixPage() {
     setBulk({ matches, unmatched, errors });
   };
 
-  const handleBulkUpload = async () => {
+  const handleBulkUpload = () => {
     if (!bulk?.matches.length) return;
-    setBulkUploading(true);
-    let ok = 0;
-    for (const { student, file } of bulk.matches) {
-      try {
-        setBusyStudentId(student.id);
-        await uploadForStudent(student, file);
-        ok++;
-      } catch (err) {
-        toast.error(`${student.studentName}: ${err.message}`);
-      }
-    }
-    setBusyStudentId(null);
-    await reloadData();
-    await refreshExams();
-    setBulkUploading(false);
+    setKoe(bulk.matches.map(({ student, file }) => ({ student, file, filnavn: filnavnFor(student) })));
     setBulk(null);
-    toast.success(`${ok} ${ok === 1 ? 'besvarelse' : 'besvarelser'} uploadet`);
   };
 
   // ---------- Åbn og slet ----------
@@ -205,13 +218,15 @@ export function StudentMatrixPage() {
                 <span className="num">{uploadedCount}</span> af <span className="num">{students.length}</span> besvarelser uploadet
                 {missingCount > 0 && <span className="font-normal text-ink-soft">, {missingCount} mangler</span>}
               </p>
-              <p className="text-sm text-ink-soft">Kun PDF-filer. Træk filerne hertil, eller vælg flere på én gang. Filnavnet skal indeholde elevens navn eller nummer.</p>
+              <p className="text-sm text-ink-soft">Kun PDF-filer. Træk filerne hertil, eller vælg flere på én gang. Filnavnet skal starte med elevens nummer (fx 7.pdf) eller indeholde aliaset. Du gennemser og dækker navne på hver besvarelse, før den uploades.</p>
             </div>
             <input ref={bulkInputRef} type="file" multiple accept=".pdf,application/pdf" className="sr-only" onChange={(e) => { handleBulkSelect(e.target.files); e.target.value = ''; }} />
             <button type="button" className="btn-secondary" onClick={() => bulkInputRef.current?.click()} disabled={missingCount === 0}>
               <Upload className="w-4 h-4" /> Upload flere filer
             </button>
           </div>
+
+          {koe && <AnonymiserDialog koe={koe} onGodkend={gemAnonymiseret} onLuk={lukKoe} />}
 
           {bulk && (
             <BulkPreview bulk={bulk} uploading={bulkUploading} onConfirm={handleBulkUpload} onCancel={() => setBulk(null)} />
@@ -266,7 +281,7 @@ export function StudentMatrixPage() {
                             <span className="inline-flex items-center gap-2 text-ink-soft"><Loader2 /> Arbejder…</span>
                           ) : submission ? (
                             <button type="button" onClick={() => openSubmission(submission)} className="inline-flex items-center gap-1.5 text-sm underline decoration-line-strong underline-offset-2 hover:decoration-ink">
-                              {submission.originalFileName || submission.fileName}
+                              {submission.fileName}
                               <ExternalLink className="w-3.5 h-3.5 text-ink-soft" />
                             </button>
                           ) : (
@@ -279,6 +294,10 @@ export function StudentMatrixPage() {
                         <td>
                           {submission && !/\.pdf$/i.test(submission.fileName || '') && !result ? (
                             <StatusPill tone="attention">Ikke PDF</StatusPill>
+                          ) : submission && !submission.anonymiseret && !result ? (
+                            <button type="button" onClick={() => anonymiserEksisterende(student, submission)} disabled={busy} title="Uploadet før anonymisering – gennemse og dæk navnet">
+                              <StatusPill tone="attention">Anonymisér</StatusPill>
+                            </button>
                           ) : result ? (
                             <GradeMark karakter={karakter} approved={approved} size="sm" />
                           ) : submission ? (
@@ -349,7 +368,7 @@ function BulkPreview({ bulk, uploading, onConfirm, onCancel }) {
       )}
       <div className="mt-4 flex gap-2">
         <button type="button" className="btn-primary" onClick={onConfirm} disabled={uploading || matches.length === 0}>
-          {uploading && <Loader2 />} Upload {matches.length} {matches.length === 1 ? 'fil' : 'filer'}
+          {uploading && <Loader2 />} Gennemse og upload {matches.length} {matches.length === 1 ? 'fil' : 'filer'}
         </button>
         <button type="button" className="btn-ghost" onClick={onCancel} disabled={uploading}>Annuller</button>
       </div>

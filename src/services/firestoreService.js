@@ -313,7 +313,10 @@ export async function addSubmission(examId, submissionData) {
     
     await setDoc(docRef, {
       fileName: submissionData.fileName,
-      originalFileName: submissionData.originalFileName || submissionData.fileName,
+      // Det oprindelige filnavn gemmes ikke – det kan indeholde elevens rigtige navn
+      originalFileName: null,
+      anonymiseret: Boolean(submissionData.anonymiseret),
+      antalFelter: submissionData.antalFelter ?? null,
       storagePath: submissionData.storagePath,
       uploadedAt: serverTimestamp(),
       fileSize: submissionData.fileSize || 0,
@@ -340,6 +343,11 @@ export async function addSubmission(examId, submissionData) {
     console.error('Error adding submission:', error);
     throw new Error(`Failed to add submission: ${error.message}`);
   }
+}
+
+/** Opdatér felter på en besvarelse (fx efter anonymisering af en ældre fil). */
+export async function opdaterBesvarelse(examId, submissionId, data) {
+  await updateDoc(doc(db, 'exams', examId, 'studentSubmissions', submissionId), { ...data, updatedAt: serverTimestamp() });
 }
 
 /**
