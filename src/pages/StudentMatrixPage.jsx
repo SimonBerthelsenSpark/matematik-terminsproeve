@@ -281,7 +281,7 @@ export function StudentMatrixPage() {
                             <span className="inline-flex items-center gap-2 text-ink-soft"><Loader2 /> Arbejder…</span>
                           ) : submission ? (
                             <button type="button" onClick={() => openSubmission(submission)} className="inline-flex items-center gap-1.5 text-sm underline decoration-line-strong underline-offset-2 hover:decoration-ink">
-                              {submission.fileName}
+                              Åbn besvarelse{submission.anonymiseret ? "" : " (ikke anonymiseret)"}
                               <ExternalLink className="w-3.5 h-3.5 text-ink-soft" />
                             </button>
                           ) : (
