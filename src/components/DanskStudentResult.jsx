@@ -13,7 +13,7 @@ import { ExternalLink, Loader2 } from './Icons.jsx';
 
 const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
 
-export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, submissions = null, onSave }) {
+export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, submissions = null, onSave, onPrint = null }) {
   const [submissionPath, setSubmissionPath] = useState(null);
   const [temp, setTemp] = useState({});
   const [saving, setSaving] = useState(false);
@@ -163,6 +163,10 @@ export function DanskStudentResult({ result, index, parsedBedoemmelse, examId, s
             <p className="font-semibold">AI's vurdering</p>
             <p className="text-ink-soft">{result.karakterBegrundelse}</p>
           </div>
+        )}
+
+        {onPrint && (
+            <button type="button" className="btn-secondary w-full" onClick={onPrint}>Print feedback til eleven</button>
         )}
 
         <BesvarelseForbrug result={result} />
