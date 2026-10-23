@@ -74,7 +74,7 @@ function delAfItem(item, a, b, pad = 0.004) {
   return { x: x0 - pad, y: item.y - pad, w: x1 - x0 + pad * 2, h: item.h + pad * 2 };
 }
 
-const NAVN_LABEL = /(?<![\p{L}])(navn|name|elevnavn|underskrift)\s*[:.]?/iu;
+const NAVN_LABEL = /(?<![\p{L}])(navn|name|elevnavn|underskrift)(?![\p{L}])\s*[:.]?/iu;
 
 /**
  * Foreslå sorte felter.

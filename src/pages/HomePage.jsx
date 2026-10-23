@@ -7,6 +7,7 @@ import { Plus, Trash2, Loader2 } from '../components/Icons.jsx';
 import { PageHeader, Spinner, Notice, EmptyState, StatusPill, formatDato, useConfirm } from '../components/ui.jsx';
 import { permanentlyDeleteExam, getSubmissions } from '../services/firestoreService.js';
 import { examStatus } from '../utils/examStatus.js';
+import { opretEksempelproeve } from '../services/eksempelService.js';
 
 /**
  * Forside: alle prøver med fremdrift og næste skridt.
@@ -16,6 +17,26 @@ export function HomePage() {
   const confirm = useConfirm();
   const { exams, loading, error, refreshExams } = useExams();
   const [deleting, setDeleting] = useState(null);
+  const [eksempelStatus, setEksempelStatus] = useState(null);
+
+  const startEksempel = async () => {
+    try {
+      setEksempelStatus('Opretter…');
+      const id = await opretEksempelproeve(setEksempelStatus);
+      await refreshExams();
+      toast.success('Eksempelprøven er klar. Hent de tre besvarelser, og upload dem her.');
+      navigate(`/exams/${id}/matrix`);
+    } catch (err) {
+      toast.error(`Eksempelprøven kunne ikke oprettes: ${err.message}`);
+    } finally {
+      setEksempelStatus(null);
+    }
+  };
+  const eksempelKnap = (cls = 'btn-secondary') => (
+    <button type="button" className={cls} onClick={startEksempel} disabled={Boolean(eksempelStatus)}>
+      {eksempelStatus ? <><Loader2 /> {eksempelStatus}</> : 'Prøv eksempelprøven'}
+    </button>
+  );
 
   const handleDeleteExam = async (exam) => {
     setDeleting(exam.id);
@@ -52,9 +73,12 @@ export function HomePage() {
         title="Prøver"
         description="Følg hver prøve fra materiale til godkendte karakterer."
         actions={
-          <Link to="/exams/new" className="btn-primary">
-            <Plus className="w-4 h-4" /> Ny prøve
-          </Link>
+          <>
+            {eksempelKnap()}
+            <Link to="/exams/new" className="btn-primary">
+              <Plus className="w-4 h-4" /> Ny prøve
+            </Link>
+          </>
         }
       />
 
@@ -68,9 +92,9 @@ export function HomePage() {
         <div className="surface">
           <EmptyState
             title="Ingen prøver endnu"
-            action={<Link to="/exams/new" className="btn-primary"><Plus className="w-4 h-4" /> Opret din første prøve</Link>}
+            action={<div className="flex flex-wrap justify-center gap-2">{eksempelKnap()}<Link to="/exams/new" className="btn-primary"><Plus className="w-4 h-4" /> Opret din første prøve</Link></div>}
           >
-            En prøve samler rettevejledning, elevernes besvarelser og karaktererne ét sted.
+            En prøve samler rettevejledning, elevernes besvarelser og karaktererne ét sted. Vil du først se, hvordan det virker, så prøv eksempelprøven med fiktive besvarelser.
             Har du ikke oprettet klassen endnu, så start under <Link to="/klasser" className="underline underline-offset-2">Klasser</Link>.
           </EmptyState>
         </div>

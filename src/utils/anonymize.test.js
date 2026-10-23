@@ -14,6 +14,10 @@ describe('forslag til sorte felter', () => {
     expect(felter[0].y).toBeLessThan(0.06);
   });
 
+  it('rammer ikke ord som "navne" eller "navnet"', () => {
+    expect(foreslaaFelter([side(1, [item('Alle navne er opdigtede, og navnet står ikke her', 0.1, 0.4)])])).toHaveLength(0);
+  });
+
   it('dækker ord til højre for en etiket, der står alene', () => {
     const felter = foreslaaFelter([side(1, [item('Navn:', 0.1, 0.05, 0.05), item('Bo', 0.3, 0.05, 0.04), item('Opgave 1', 0.1, 0.3)])]);
     expect(felter.some(f => f.x > 0.29 && f.x < 0.31)).toBe(true);

@@ -9,6 +9,7 @@ import { Spinner, Notice, EmptyState, GradeMark, GradeLegend, StatusPill, useCon
 import { getAllClasses, getStudents } from '../services/classService.js';
 import { uploadStudentSubmission, getFileDownloadURL, uploadFile } from '../services/storageService.js';
 import { AnonymiserDialog } from '../components/AnonymiserDialog.jsx';
+import { EKSEMPEL_FILER } from './LandingPage.jsx';
 import { addSubmission, getSubmissions, deleteSubmission, getGradingResults, opdaterBesvarelse } from '../services/firestoreService.js';
 import { matchFilesToStudents, validateSubmissionFile, PDF_HJAELP } from '../utils/matchFiles.js';
 
@@ -225,6 +226,17 @@ export function StudentMatrixPage() {
               <Upload className="w-4 h-4" /> Upload flere filer
             </button>
           </div>
+
+          {exam.eksempel && missingCount > 0 && (
+            <Notice tone="info" title="Eksempelprøve: hent de fiktive besvarelser">
+              <p>Hent filerne, og upload dem med "Upload flere filer" (filnavnet indeholder elevnummeret). Læg mærke til, at appen foreslår at dække navnet øverst.</p>
+              <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                {EKSEMPEL_FILER.filter(f => f.fil.startsWith('besvarelse')).map(f => (
+                  <a key={f.fil} href={`/eksempel/${f.fil}`} download className="underline underline-offset-2">{f.navn}</a>
+                ))}
+              </p>
+            </Notice>
+          )}
 
           {koe && <AnonymiserDialog koe={koe} onGodkend={gemAnonymiseret} onLuk={lukKoe} />}
 

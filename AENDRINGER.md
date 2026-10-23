@@ -241,3 +241,10 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - "Print feedback" på Retning (hele klassen) og "Print feedback til eleven" ved hver elev. Ét A4-ark pr. elev med prøve, elevnummer/alias, karakter, point pr. opgave (dansk: delkarakter pr. kriterium), evt. kommentar pr. opgave og feedback til eleven.
 - Valg: kun godkendte karakterer (ikke-godkendte markeres "foreløbig") og om kommentarer pr. opgave skal med. Lærerens rettede point og karakter bruges, når de findes.
 - "Gem som PDF" i printdialogen giver en PDF til digital deling.
+
+## Forside før login og eksempelprøve
+
+- **Offentlig forside** (`/`) for besøgende, der ikke er logget ind: hvad appen gør, sådan virker det, elevdata, eksempelprøve og "Opret konto"/"Log ind" (`/login`, `/opret`). Siden Databehandling kan også læses uden login.
+- **Fiktiv eksempelprøve** i `public/eksempel/`: opgavesæt, rettevejledning, omsætningstabel (30 point) og tre besvarelser på forskellige niveauer med opdigtede navne. Laves med `python3 scripts/lav-eksempelproeve.py`.
+- **"Prøv eksempelprøven"** på forsiden i appen opretter klassen "Eksempel 9.X" med tre elever, prøven og materialet. Under Besvarelser vises links til de tre besvarelser, så læreren selv prøver upload og anonymisering.
+- Rettet: ord som "navne" og "navnet" blev fejlagtigt dækket som en "Navn:"-linje.

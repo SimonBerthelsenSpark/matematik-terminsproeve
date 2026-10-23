@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { logInd, opretKonto, nulstilAdgangskode, sendBekraeftelse, logUd, authFejl } from '../services/authService.js';
@@ -18,10 +19,10 @@ function Ramme({ title, children, footer }) {
   return (
     <div className="min-h-screen bg-paper flex flex-col items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2.5 mb-6">
+        <Link to="/" className="flex items-center gap-2.5 mb-6 w-fit" aria-label="AI Prøveretter – forside">
           <Logo />
           <span className="font-semibold text-[17px] tracking-[-0.01em]">AI Prøveretter</span>
-        </div>
+        </Link>
         <div className="surface p-6">
           <h1 className="text-[20px] font-semibold leading-tight mb-4">{title}</h1>
           {children}
@@ -33,15 +34,23 @@ function Ramme({ title, children, footer }) {
 }
 
 /** Log ind, opret konto og glemt adgangskode. */
-export function LoginPage() {
-  const [mode, setMode] = useState('login'); // login | opret | glemt
+export function LoginPage({ startMode = 'login' }) {
+  const navigate = useNavigate();
+  const [mode, setMode] = useState(startMode); // login | opret | glemt
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [fejl, setFejl] = useState(null);
   const [sendt, setSendt] = useState(false);
 
-  const skift = (m) => { setMode(m); setFejl(null); setSendt(false); };
+  const skift = (m) => {
+    setMode(m);
+    setFejl(null);
+    setSendt(false);
+    // Hold adressen i takt med formularen (på andre sider end /login og /opret beholdes adressen)
+    if (m === 'opret') navigate('/opret', { replace: true });
+    else if (m === 'login' && window.location.pathname === '/opret') navigate('/login', { replace: true });
+  };
 
   const submit = async (e) => {
     e.preventDefault();
