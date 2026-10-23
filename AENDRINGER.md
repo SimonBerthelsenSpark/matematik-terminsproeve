@@ -248,3 +248,9 @@ Siden skal være åben, mens der rettes. Kommer et resultat aldrig frem, fx ford
 - **Fiktiv eksempelprøve** i `public/eksempel/`: opgavesæt, rettevejledning, omsætningstabel (30 point) og tre besvarelser på forskellige niveauer med opdigtede navne. Laves med `python3 scripts/lav-eksempelproeve.py`.
 - **"Prøv eksempelprøven"** på forsiden i appen opretter klassen "Eksempel 9.X" med tre elever, prøven og materialet. Under Besvarelser vises links til de tre besvarelser, så læreren selv prøver upload og anonymisering.
 - Rettet: ord som "navne" og "navnet" blev fejlagtigt dækket som en "Navn:"-linje.
+
+## Priser
+
+- Ny offentlig side `/priser` (link i topbjælken og bunden af forsiden): Prøv (gratis, 30 besvarelser), Lærer (99 kr./md. eller 990 kr./år, 250 besvarelser/år, ekstra 100 for 349 kr.) og Skole (49 kr. pr. elev i 7.–9. klasse pr. år, min. 150 elever). Alle priser ekskl. moms. Udregner til skolelicens og spørgsmål/svar.
+- Kontakt-e-mail til skoler og kommuner: `KONTAKT_EMAIL` i `src/pages/PricingPage.jsx`.
+- Bemærk: betaling og loft over besvarelser er ikke bygget ind i appen endnu – siden viser prismodellen.
