@@ -16,6 +16,15 @@ const Blok = ({ title, children }) => (
 export function DataPage() {
   return (
     <Layout width="narrow">
+      <DataIndhold />
+    </Layout>
+  );
+}
+
+/** Indholdet bruges både i appen og på den offentlige side. */
+export function DataIndhold() {
+  return (
+    <>
       <PageHeader
         title="Databehandling"
         description="Hvilke oplysninger appen behandler, hvor de ligger, og hvor længe. Siden kan bruges som grundlag for skolens oversigt over AI-systemer og konsekvensanalyse."
@@ -53,6 +62,6 @@ export function DataPage() {
           <p>Google (Firebase), Netlify og OpenAI. Alle tre er amerikanske virksomheder, så skolen skal vurdere grundlaget for overførsel til tredjelande som en del af databehandleraftalen.</p>
         </Blok>
       </div>
-    </Layout>
+    </>
   );
 }

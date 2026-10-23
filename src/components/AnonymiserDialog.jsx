@@ -96,7 +96,7 @@ export function AnonymiserDialog({ koe, onGodkend, onLuk }) {
       onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); fortryd(); } }}>
       <header className="bg-surface border-b border-line">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="min-w-0 mr-auto">
+          <div className="min-w-0 flex-1 basis-72">
             <h2 id="anon-titel" className="font-semibold truncate">
               Anonymisér: {item.student ? `${item.student.studentNumber}. ${item.student.studentName}` : item.filnavn}
             </h2>
