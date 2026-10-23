@@ -28,8 +28,9 @@ export function PublicLayout({ children }) {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
           <Link to="/" className="flex items-center gap-2.5 mr-auto" aria-label="AI Prøveretter – forside">
             <Logo />
-            <span className="font-semibold text-[16px] tracking-[-0.01em]">AI Prøveretter</span>
+            <span className="hidden min-[440px]:inline font-semibold text-[16px] tracking-[-0.01em]">AI Prøveretter</span>
           </Link>
+          <Link to="/priser" className="btn-ghost btn-sm">Priser</Link>
           <Link to="/login" className="btn-ghost btn-sm">Log ind</Link>
           <Link to="/opret" className="btn-primary btn-sm">Opret konto</Link>
         </div>
@@ -38,6 +39,7 @@ export function PublicLayout({ children }) {
       <footer className="border-t border-line bg-surface">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row gap-2 sm:items-center text-[13px] text-ink-soft">
           <span className="mr-auto">AI Prøveretter er et støtteværktøj til terminsprøver. Det må ikke bruges til den officielle bedømmelse af folkeskolens prøver.</span>
+          <Link to="/priser" className="underline underline-offset-2 hover:text-ink">Priser</Link>
           <Link to="/databehandling" className="underline underline-offset-2 hover:text-ink">Databehandling</Link>
         </div>
       </footer>
@@ -203,7 +205,7 @@ export function LandingPage() {
 
       <section className="max-w-6xl mx-auto px-4 sm:px-6 py-14 text-center">
         <h2 className="text-[24px] font-semibold tracking-[-0.01em]">Klar til at prøve?</h2>
-        <p className="mt-2 text-ink-soft">Opret en konto med din skole-mail.</p>
+        <p className="mt-2 text-ink-soft">Opret en konto med din skole-mail. De første 30 besvarelser er gratis – <Link to="/priser" className="underline underline-offset-2 hover:text-ink">se priser</Link>.</p>
         <div className="mt-6 flex justify-center gap-3">
           <Link to="/opret" className="btn-primary">Opret konto</Link>
           <Link to="/login" className="btn-secondary">Log ind</Link>

@@ -11,6 +11,7 @@ import { auth } from './config/firebase.js';
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
 import { PrintRoot } from './components/PrintFeedback.jsx';
 import { LandingPage, PublicLayout } from './pages/LandingPage.jsx';
+const PricingPage = lazy(() => import('./pages/PricingPage.jsx').then(m => ({ default: m.PricingPage })));
 const DataIndhold = lazy(() => import('./pages/DataPage.jsx').then(m => ({ default: m.DataIndhold })));
 import { LoginPage, BekraeftEmailPage, AfventerGodkendelsePage, AuthLoader } from './pages/LoginPage.jsx';
 
@@ -31,6 +32,7 @@ function AuthGate({ children }) {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage key="login" />} />
           <Route path="/opret" element={<LoginPage key="opret" startMode="opret" />} />
+          <Route path="/priser" element={<PricingPage />} />
           <Route path="/databehandling" element={<PublicLayout><div className="max-w-3xl mx-auto px-4 sm:px-6 py-8"><DataIndhold /></div></PublicLayout>} />
           <Route path="*" element={<LoginPage />} />
         </Routes>
